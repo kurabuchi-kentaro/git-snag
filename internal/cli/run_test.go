@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -46,5 +47,22 @@ func TestRun_unknownFlagFails(t *testing.T) {
 	code := Run([]string{"--no-such-flag"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("unknown flag should exit non-zero")
+	}
+}
+
+func TestRun_customConfigPathIsActuallyLoaded(t *testing.T) {
+	// A broken YAML at the --config path must abort startup (REQ-A6),
+	// which also proves the flag-specified file is the one being read.
+	path := filepath.Join(t.TempDir(), "custom.yaml")
+	if err := os.WriteFile(path, []byte("scan: [broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--config", path, t.TempDir()}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("broken config should exit non-zero")
+	}
+	if !strings.Contains(stderr.String(), "custom.yaml") {
+		t.Errorf("stderr = %q, want it to reference the custom config", stderr.String())
 	}
 }

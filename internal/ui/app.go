@@ -50,6 +50,7 @@ type Model struct {
 	filterInput     textinput.Model
 	filtering       bool
 	scanning        bool
+	showHelp        bool
 	selection       map[string]bool
 	visualAnchor    int
 	preVisual       map[string]bool
@@ -161,6 +162,11 @@ func (m Model) finishExplosion() (tea.Model, tea.Cmd) {
 // updateKey routes key presses. The filter input takes priority when
 // focused; visual mode accepts only its own keys (REQ-A5).
 func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp {
+		m.showHelp = false
+		return m, nil
+	}
+
 	if m.filtering {
 		switch msg.String() {
 		case "esc", "enter":
@@ -230,6 +236,8 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Sort):
 		m.sortMode = m.sortMode.Next()
 		m.rebuildRows()
+	case key.Matches(msg, keys.Help):
+		m.showHelp = true
 	}
 	return m, nil
 }
@@ -298,6 +306,9 @@ func (m *Model) expandFocused() {
 
 // View implements tea.Model.
 func (m Model) View() tea.View {
+	if m.showHelp {
+		return tea.NewView(m.viewHelp())
+	}
 	switch m.phase {
 	case phaseConfirming:
 		return tea.NewView(m.viewConfirm())

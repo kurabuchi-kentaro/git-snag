@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/kurabuchi-kentaro/git-snag/internal/config"
 	"github.com/kurabuchi-kentaro/git-snag/internal/enrich"
 	"github.com/kurabuchi-kentaro/git-snag/internal/scan"
 	"github.com/kurabuchi-kentaro/git-snag/internal/ui"
@@ -24,6 +25,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("git-snag", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print version and exit")
+	noAnimation := fs.Bool("no-animation", false, "disable the deletion animation")
+	configPath := fs.String("config", "", "config file path (default: XDG config dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: git-snag [flags] [scan-root]\n\n")
 		fs.PrintDefaults()
@@ -41,6 +44,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "git-snag: git executable not found in PATH")
 		return 1
 	}
+
+	path := *configPath
+	if path == "" {
+		var err error
+		if path, err = config.DefaultPath(); err != nil {
+			fmt.Fprintf(stderr, "git-snag: %v\n", err)
+			return 1
+		}
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "git-snag: %v\n", err)
+		return 1
+	}
+	excludes, animation := config.Resolve(cfg, *noAnimation)
 
 	root := "."
 	if fs.NArg() > 0 {
@@ -62,7 +80,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := runTUI(root, cwd); err != nil {
+	if err := runTUI(root, cwd, excludes, animation); err != nil {
 		fmt.Fprintf(stderr, "git-snag: %v\n", err)
 		return 1
 	}
@@ -70,15 +88,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // runTUI starts the Bubble Tea program and feeds it the scan stream.
-func runTUI(root, cwd string) error {
-	p := tea.NewProgram(ui.NewModel())
+func runTUI(root, cwd string, excludes map[string]bool, animation bool) error {
+	p := tea.NewProgram(ui.NewModel().WithAnimation(animation))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
 		defer p.Send(ui.ScanDoneMsg{})
-		ch, err := scan.Walk(ctx, root, scan.DefaultExcludes())
+		ch, err := scan.Walk(ctx, root, excludes)
 		if err != nil {
 			return
 		}
