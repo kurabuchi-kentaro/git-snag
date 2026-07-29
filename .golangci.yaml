@@ -1,0 +1,35 @@
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  # (gosimple was merged into staticcheck in golangci-lint v2)
+  default: standard
+  enable:
+    - gosec
+    - errorlint
+    - revive
+    - misspell
+    - goconst
+    - gocritic
+    - dupl
+  exclusions:
+    # Use source-comment-based detection so exclusion also works when files
+    # arrive via stdin (jj fix runs `golangci-lint fmt --stdin`, which cannot
+    # apply path-based exclusions).
+    generated: strict
+    rules:
+      # Test code legitimately repeats setup boilerplate and uses literals.
+      - path: _test\.go
+        linters:
+          - dupl
+          - goconst
+          - gosec
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/kurabuchi-kentaro/git-snag

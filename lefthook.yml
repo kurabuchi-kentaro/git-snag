@@ -1,0 +1,25 @@
+# Git hooks for contributors working via plain git. Run `lefthook install`
+# once after cloning. Maintainers working via jj: git hooks do not fire —
+# see AGENT.md and docs/adr/0012 for the jj fix + jj absorb workflow.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: format check
+      run: golangci-lint fmt --diff {staged_files}
+      glob: "*.go"
+    - name: vet
+      run: go vet ./...
+      glob: "*.go"
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: test
+      run: go test ./...
+    - name: lint
+      run: golangci-lint run
+    - name: secrets scan
+      # Full-history scan: the repo is small, so this stays fast and never
+      # misses a commit the way range-based scans can on new branches.
+      run: gitleaks git --redact

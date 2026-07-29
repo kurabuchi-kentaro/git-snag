@@ -1,0 +1,16 @@
+# Binaries
+/git-snag
+/dist/
+
+# Go
+*.test
+*.out
+coverage.html
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

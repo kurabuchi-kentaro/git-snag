@@ -1,0 +1,10 @@
+# gitleaks configuration. Extends the built-in default ruleset.
+# https://github.com/gitleaks/gitleaks#configuration
+
+[extend]
+useDefault = true
+
+# Add allowlist entries here as needed, e.g.:
+# [[allowlists]]
+# description = "test fixtures with fake credentials"
+# paths = ['''internal/testutil/fixtures/.*''']
