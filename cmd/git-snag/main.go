@@ -3,13 +3,11 @@
 package main
 
 import (
-	"fmt"
+	"os"
 
-	"github.com/kurabuchi-kentaro/git-snag/internal/version"
+	"github.com/kurabuchi-kentaro/git-snag/internal/cli"
 )
 
 func main() {
-	// Phase 0 placeholder: the real entrypoint (internal/cli.Run) arrives
-	// with the first UI milestone.
-	fmt.Printf("git-snag %s (commit %s, built %s)\n", version.Version, version.Commit, version.Date)
+	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

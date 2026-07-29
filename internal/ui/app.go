@@ -1,0 +1,285 @@
+package ui
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
+)
+
+// Model is the root Bubble Tea model of the browsing UI.
+type Model struct {
+	repos           []domain.Repo
+	rows            []uiRow
+	focus           int
+	collapsedRepos  map[string]bool
+	collapsedGroups map[string]bool
+	sortMode        domain.SortMode
+	mergedOnly      bool
+	filter          string
+	filterInput     textinput.Model
+	filtering       bool
+	scanning        bool
+	width           int
+	height          int
+	now             func() time.Time
+}
+
+// NewModel returns an empty model waiting for RepoFoundMsg streams.
+func NewModel() Model {
+	ti := textinput.New()
+	ti.Placeholder = "filter by branch or path"
+	ti.Prompt = "/ "
+	return Model{
+		collapsedRepos:  map[string]bool{},
+		collapsedGroups: map[string]bool{},
+		filterInput:     ti,
+		scanning:        true,
+		width:           80,
+		height:          24,
+		now:             time.Now,
+	}
+}
+
+// Init implements tea.Model.
+func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+// Update implements tea.Model.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case RepoFoundMsg:
+		m.repos = append(m.repos, msg.Repo)
+		sort.Slice(m.repos, func(i, j int) bool { return m.repos[i].Path < m.repos[j].Path })
+		m.rebuildRows()
+		return m, nil
+
+	case ScanDoneMsg:
+		m.scanning = false
+		return m, nil
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case tea.KeyPressMsg:
+		return m.updateKey(msg)
+	}
+	return m, nil
+}
+
+// updateKey routes key presses, giving the filter input priority when it has
+// focus.
+func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.filtering {
+		switch msg.String() {
+		case "esc", "enter":
+			m.filtering = false
+			m.filterInput.Blur()
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			m.filter = m.filterInput.Value()
+			m.rebuildRows()
+			return m, cmd
+		}
+	}
+
+	switch {
+	case key.Matches(msg, keys.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, keys.Down):
+		m.moveFocus(1)
+	case key.Matches(msg, keys.Up):
+		m.moveFocus(-1)
+	case key.Matches(msg, keys.Collapse):
+		m.collapseFocused()
+	case key.Matches(msg, keys.Expand):
+		m.expandFocused()
+	case key.Matches(msg, keys.Filter):
+		m.filtering = true
+		return m, m.filterInput.Focus()
+	case key.Matches(msg, keys.Merged):
+		m.mergedOnly = !m.mergedOnly
+		m.rebuildRows()
+	case key.Matches(msg, keys.Sort):
+		m.sortMode = m.sortMode.Next()
+		m.rebuildRows()
+	}
+	return m, nil
+}
+
+// moveFocus shifts the focused row, clamped at both ends.
+func (m *Model) moveFocus(delta int) {
+	m.focus += delta
+	if m.focus < 0 {
+		m.focus = 0
+	}
+	if m.focus >= len(m.rows) {
+		m.focus = len(m.rows) - 1
+	}
+	if m.focus < 0 {
+		m.focus = 0
+	}
+}
+
+// collapseFocused folds the focused group/repo, or — on a leaf — its nearest
+// ancestor, moving focus there.
+func (m *Model) collapseFocused() {
+	if len(m.rows) == 0 {
+		return
+	}
+	row := m.rows[m.focus]
+	switch row.kind {
+	case rowRepo:
+		m.collapsedRepos[row.key] = true
+	case rowGroup:
+		m.collapsedGroups[row.key] = true
+	case rowLeaf:
+		target := row.parentKey
+		if _, _, isGroup := splitGroupKey(target); isGroup {
+			m.collapsedGroups[target] = true
+		} else {
+			m.collapsedRepos[target] = true
+		}
+		m.rebuildRows()
+		for i, r := range m.rows {
+			if r.key == target {
+				m.focus = i
+				break
+			}
+		}
+		return
+	}
+	m.rebuildRows()
+}
+
+// expandFocused unfolds the focused group or repo header.
+func (m *Model) expandFocused() {
+	if len(m.rows) == 0 {
+		return
+	}
+	row := m.rows[m.focus]
+	switch row.kind {
+	case rowRepo:
+		delete(m.collapsedRepos, row.key)
+	case rowGroup:
+		delete(m.collapsedGroups, row.key)
+	case rowLeaf:
+		return
+	}
+	m.rebuildRows()
+}
+
+// View implements tea.Model.
+func (m Model) View() tea.View {
+	var b strings.Builder
+	now := m.now()
+
+	b.WriteString(m.statusLine())
+	b.WriteString("\n\n")
+
+	if len(m.rows) == 0 {
+		if m.scanning {
+			b.WriteString(styleDim.Render("scanning..."))
+		} else {
+			b.WriteString(styleDim.Render("No worktrees match the current view"))
+		}
+		return tea.NewView(b.String())
+	}
+
+	for i, row := range m.rows {
+		focused := i == m.focus
+		switch row.kind {
+		case rowRepo:
+			repo := &m.repos[row.repoIdx]
+			caret := "▾"
+			if m.collapsedRepos[row.key] {
+				caret = "▸"
+			}
+			line := fmt.Sprintf("%s %s  %s", caret, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
+			count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
+			line = padBetween(line, styleDim.Render(count), m.width)
+			if focused {
+				line = styleFocused.Render(fmt.Sprintf("%s %s  %s", caret, repo.Name, repo.Path))
+			}
+			b.WriteString(line + "\n")
+		case rowGroup:
+			caret := "▾"
+			if m.collapsedGroups[row.key] {
+				caret = "▸"
+			}
+			line := connectorPrefix(row.isLast) + caret + " " + row.node.Name + "/"
+			if focused {
+				line = styleFocused.Render(line)
+			}
+			b.WriteString(line + "\n")
+		case rowLeaf:
+			prefix := ""
+			if !row.flat {
+				prefix = connectorPrefix(row.isLast)
+			}
+			b.WriteString(renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused) + "\n")
+			pathIndent := strings.Repeat(" ", len(prefix))
+			b.WriteString(renderPathLine(pathIndent+"  ", *row.node.Worktree, m.width) + "\n")
+		}
+	}
+
+	b.WriteString("\n")
+	if m.filtering || m.filter != "" {
+		b.WriteString(m.filterInput.View() + "\n")
+	}
+	b.WriteString(m.footer())
+	return tea.NewView(b.String())
+}
+
+// statusLine summarizes the scan: repo/worktree counts and scan state.
+func (m Model) statusLine() string {
+	total := 0
+	for i := range m.repos {
+		total += len(m.repos[i].Worktrees)
+	}
+	s := fmt.Sprintf("%d repos · %d worktrees", len(m.repos), total)
+	if m.scanning {
+		s += " · scanning..."
+	}
+	if m.mergedOnly {
+		s += " · merged only"
+	}
+	if m.sortMode.Flat() {
+		s += " · " + sortModeLabel(m.sortMode)
+	}
+	return styleDim.Render(s)
+}
+
+func sortModeLabel(mode domain.SortMode) string {
+	switch mode {
+	case domain.StaleFirst:
+		return "oldest first"
+	case domain.FreshFirst:
+		return "newest first"
+	case domain.MergedFirst:
+		return "merged first"
+	case domain.TreeView:
+		return "tree"
+	default:
+		return "tree"
+	}
+}
+
+// footer renders the key hints.
+func (m Model) footer() string {
+	hints := []string{
+		"j/k move", "h/l collapse", "/ filter", "m merged only", "s sort", "q quit",
+	}
+	return styleDim.Render(strings.Join(hints, "  ·  "))
+}

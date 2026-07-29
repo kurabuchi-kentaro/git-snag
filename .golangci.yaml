@@ -12,6 +12,13 @@ linters:
     - goconst
     - gocritic
     - dupl
+  settings:
+    errcheck:
+      exclude-functions:
+        # Writing user-facing text to stdout/stderr: nothing to do on failure.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
   exclusions:
     # Use source-comment-based detection so exclusion also works when files
     # arrive via stdin (jj fix runs `golangci-lint fmt --stdin`, which cannot
