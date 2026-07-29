@@ -3,3 +3,4 @@
 golangci-lint = "2"
 lefthook = "latest"
 gitleaks = "8"
+goreleaser = "2"

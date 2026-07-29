@@ -5,22 +5,47 @@
 In forestry, a *snag* is a standing dead tree — often one left behind by
 fire. Your projects accumulate them too: worktrees for branches long merged,
 experiments abandoned months ago, directories you `rm -rf`'d but git still
-remembers. git-snag finds them all and lets you clear them out.
+remembers. git-snag finds them all and lets you clear them out — worktree
+and branch together, across every repository under your current directory.
 
-**Status: pre-release, under active development. Not yet functional.**
+**Status: pre-release, under active development.**
+
+<!-- TODO: demo GIF (vhs/asciinema recording of browse → select → boom) -->
 
 ## What it does
 
-- Scans below the current directory for git repositories and lists every
-  worktree across all of them, `tree`-command style.
-- Shows what makes each worktree safe (or unsafe) to delete: merged into the
-  default branch, uncommitted changes, unpushed commits, locked, or already
-  gone from disk (prunable).
-- Multi-select (including vim-style visual range selection), one confirmation,
-  batch delete — worktree and branch together.
-- Deletes go out with a bang. (Explosion animation adapted from
+- **Scans recursively** below the current directory (or a path you give it)
+  and streams every repository it finds into one view. Linked worktrees and
+  submodules are recognized structurally and never double-counted.
+- **Renders branches as a tree**: `feature/rate-limit` and
+  `feature/old-migration` nest under `feature/`, `tree`-command style —
+  including accidents like `feature/fix/login-redirect`. Groups collapse,
+  and select as a unit.
+- **Shows what makes a worktree deletable** at a glance:
+
+  | tag | meaning |
+  |---|---|
+  | ✅ | merged into the default branch (origin/HEAD) |
+  | 📝 | uncommitted changes |
+  | ⬆️ | commits not pushed to the upstream |
+  | 🔒 | locked via `git worktree lock` |
+  | 👻 | directory gone; only git metadata remains (prunable) |
+  | 🏠 / 📍 | main worktree / the one you're in — never selectable |
+
+- **Sorts to find candidates**: cycle tree view → oldest-first →
+  newest-first → merged-first. Non-tree modes render flat with full branch
+  names. `/` filters by branch or path; `m` shows merged only.
+- **Selects in bulk**: space toggles a worktree, a group, or a whole
+  repository (tri-state indicators); `v` starts a vim-style visual range.
+- **Deletes with consent**: one confirmation screen lists every selected
+  item with its warnings and lets you keep individual branches. Dirty,
+  locked, or unpushed worktrees are force-handled *after* you confirm —
+  never blocked, never silent. Failures don't abort the rest of the batch,
+  and the summary reports worktree and branch outcomes separately.
+- **Goes out with a bang.** Deletion plays a short ASCII explosion that
+  scales with the batch size, adapted from
   [lazygit](https://github.com/jesseduffield/lazygit)'s nuke animation —
-  thanks!)
+  thanks! Skip it with any key, or disable it entirely.
 
 ## Install
 
@@ -32,7 +57,57 @@ brew install kurabuchi-kentaro/tap/git-snag
 go install github.com/kurabuchi-kentaro/git-snag/cmd/git-snag@latest
 ```
 
-Installed on PATH it works both as `git-snag` and as `git snag`.
+On PATH it works both as `git-snag` and as `git snag`.
+
+Requires the `git` binary. Linux and macOS are supported; Windows works via
+WSL.
+
+## Usage
+
+```sh
+git snag                 # scan below the current directory
+git snag ~/projects      # scan below a specific root
+git snag --no-animation  # calm mode
+```
+
+### Keybindings
+
+| key | action |
+|---|---|
+| `j`/`k`, arrows | move |
+| `h`/`l` | collapse / expand (on a leaf, `h` jumps to its parent) |
+| `space` | select worktree / group / repository |
+| `v` | visual range select (`v` confirms, `esc` cancels) |
+| `d` / `enter` | delete selected… |
+| `y` / `n` | …confirm / cancel |
+| `/` | filter by branch or path |
+| `m` | merged-only toggle |
+| `s` | cycle sort: tree → oldest → newest → merged-first |
+| `?` | help |
+| `q` | quit |
+
+## Configuration
+
+Optional, at `~/.config/git-snag/config.yaml`:
+
+```yaml
+scan:
+  excludes: [dist, build] # extra directory names to skip while scanning
+animation:
+  enabled: false          # same effect as --no-animation
+```
+
+## Known limitations
+
+- Bare repositories (`git clone --bare` + worktrees) are not discovered in
+  v0.1 — see `docs/adr/0011`.
+- Merge detection needs an `origin` remote; local-only repositories simply
+  show no ✅ tags.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Design decisions live in
+[`docs/adr/`](docs/adr/).
 
 ## License
 

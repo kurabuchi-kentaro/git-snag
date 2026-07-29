@@ -1,0 +1,43 @@
+version: 2
+
+project_name: git-snag
+
+builds:
+  - main: ./cmd/git-snag
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/kurabuchi-kentaro/git-snag/internal/version.Version={{.Version}}
+      - -X github.com/kurabuchi-kentaro/git-snag/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/kurabuchi-kentaro/git-snag/internal/version.Date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+
+changelog:
+  use: git
+
+# brews is soft-deprecated in favor of homebrew_casks, but kept deliberately:
+# a formula supports plain `brew install kurabuchi-kentaro/tap/git-snag`
+# without --cask, which is the install UX this project wants. Revisit if
+# goreleaser removes formula support.
+brews:
+  - repository:
+      owner: kurabuchi-kentaro
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/kurabuchi-kentaro/git-snag
+    description: "A TUI to snag your dead git worktrees"
+    license: MIT
+    install: |
+      bin.install "git-snag"
+    test: |
+      system "#{bin}/git-snag", "--version"
