@@ -21,7 +21,17 @@ type Repo struct {
 // NewRepo creates a repository with an initial empty commit on `main`.
 func NewRepo(t testing.TB) *Repo {
 	t.Helper()
-	r := &Repo{T: t, Dir: t.TempDir()}
+	return NewRepoAt(t, t.TempDir())
+}
+
+// NewRepoAt creates a repository at the given path (created if necessary)
+// with an initial empty commit on `main`.
+func NewRepoAt(t testing.TB, dir string) *Repo {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	r := &Repo{T: t, Dir: dir}
 	r.Git("init", "-q", "-b", "main")
 	r.Commit("initial commit")
 	return r
