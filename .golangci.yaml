@@ -24,6 +24,11 @@ linters:
           - dupl
           - goconst
           - gosec
+      # testutil is test-support code: it spawns git on purpose and writes
+      # fixture files whose permissions are irrelevant.
+      - path: internal/testutil/
+        linters:
+          - gosec
 
 formatters:
   enable:
