@@ -10,11 +10,26 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/kurabuchi-kentaro/git-snag/internal/action"
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
+)
+
+// phase is the top-level UI state machine.
+type phase int
+
+const (
+	phaseBrowsing phase = iota
+	phaseConfirming
+	phaseExecuting
+	phaseSummary
 )
 
 // Model is the root Bubble Tea model of the browsing UI.
 type Model struct {
+	phase           phase
+	confirmItems    []action.PlanItem
+	confirmCursor   int
+	results         []action.Result
 	repos           []domain.Repo
 	rows            []uiRow
 	focus           int
@@ -75,6 +90,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case DeleteResultsMsg:
+		m.applyResults(msg)
+		return m, nil
+
 	case tea.MouseClickMsg:
 		if m.visualAnchor >= 0 {
 			m.confirmVisual()
@@ -82,6 +101,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		switch m.phase {
+		case phaseConfirming:
+			return m.updateConfirmKey(msg)
+		case phaseExecuting:
+			return m, nil
+		case phaseSummary:
+			m.phase = phaseBrowsing
+			m.results = nil
+			return m, nil
+		case phaseBrowsing:
+		}
 		return m.updateKey(msg)
 	}
 	return m, nil
@@ -144,6 +174,12 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.Escape):
 		m.selection = map[string]bool{}
+	case key.Matches(msg, keys.Delete):
+		if len(m.selection) > 0 {
+			m.confirmItems = m.buildPlan()
+			m.confirmCursor = 0
+			m.phase = phaseConfirming
+		}
 	case key.Matches(msg, keys.Filter):
 		m.filtering = true
 		return m, m.filterInput.Focus()
@@ -221,6 +257,16 @@ func (m *Model) expandFocused() {
 
 // View implements tea.Model.
 func (m Model) View() tea.View {
+	switch m.phase {
+	case phaseConfirming:
+		return tea.NewView(m.viewConfirm())
+	case phaseExecuting:
+		return tea.NewView("deleting..." + "\n")
+	case phaseSummary:
+		return tea.NewView(m.viewSummary())
+	case phaseBrowsing:
+	}
+
 	var b strings.Builder
 	now := m.now()
 
@@ -341,7 +387,8 @@ func sortModeLabel(mode domain.SortMode) string {
 // footer renders the key hints.
 func (m Model) footer() string {
 	hints := []string{
-		"j/k move", "h/l collapse", "/ filter", "m merged only", "s sort", "q quit",
+		"j/k move", "space select", "v visual", "d delete",
+		"h/l collapse", "/ filter", "m merged only", "s sort", "q quit",
 	}
 	return styleDim.Render(strings.Join(hints, "  ·  "))
 }

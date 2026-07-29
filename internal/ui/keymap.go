@@ -10,6 +10,7 @@ type keyMap struct {
 	Expand   key.Binding
 	Select   key.Binding
 	Visual   key.Binding
+	Delete   key.Binding
 	Escape   key.Binding
 	Filter   key.Binding
 	Merged   key.Binding
@@ -24,6 +25,7 @@ var keys = keyMap{
 	Expand:   key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("→/l", "expand")),
 	Select:   key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
 	Visual:   key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "visual select")),
+	Delete:   key.NewBinding(key.WithKeys("d", "enter"), key.WithHelp("d", "delete selected")),
 	Escape:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
 	Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 	Merged:   key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merged only")),
