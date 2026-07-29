@@ -52,10 +52,22 @@ func (m Model) updateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "y":
 		items := m.confirmItems
-		m.phase = phaseExecuting
-		return m, func() tea.Msg {
+		execute := func() tea.Msg {
 			return DeleteResultsMsg{Results: action.Execute(context.Background(), items)}
 		}
+		if !m.animationEnabled {
+			m.phase = phaseExecuting
+			return m, execute
+		}
+		// Animation and deletion start together (REQ-P5); the summary waits
+		// for whichever finishes last.
+		m.phase = phaseExploding
+		m.explosionFrame = 0
+		m.explosionDone = false
+		m.resultsArrived = false
+		m.explosionTier = tierFor(len(items))
+		m.explosionSeed = m.now().UnixNano()
+		return m, tea.Batch(execute, explosionTick())
 	case "n", "q", "esc":
 		m.phase = phaseBrowsing
 		m.confirmItems = nil

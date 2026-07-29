@@ -20,16 +20,25 @@ type phase int
 const (
 	phaseBrowsing phase = iota
 	phaseConfirming
+	phaseExploding
 	phaseExecuting
 	phaseSummary
 )
 
 // Model is the root Bubble Tea model of the browsing UI.
 type Model struct {
-	phase           phase
-	confirmItems    []action.PlanItem
-	confirmCursor   int
-	results         []action.Result
+	phase            phase
+	confirmItems     []action.PlanItem
+	confirmCursor    int
+	results          []action.Result
+	pendingResults   []action.Result
+	resultsArrived   bool
+	animationEnabled bool
+	explosionFrame   int
+	explosionDone    bool
+	explosionTier    explosionTier
+	explosionSeed    int64
+
 	repos           []domain.Repo
 	rows            []uiRow
 	focus           int
@@ -55,15 +64,16 @@ func NewModel() Model {
 	ti.Placeholder = "filter by branch or path"
 	ti.Prompt = "/ "
 	return Model{
-		collapsedRepos:  map[string]bool{},
-		collapsedGroups: map[string]bool{},
-		filterInput:     ti,
-		scanning:        true,
-		selection:       map[string]bool{},
-		visualAnchor:    -1,
-		width:           80,
-		height:          24,
-		now:             time.Now,
+		collapsedRepos:   map[string]bool{},
+		collapsedGroups:  map[string]bool{},
+		filterInput:      ti,
+		scanning:         true,
+		selection:        map[string]bool{},
+		visualAnchor:     -1,
+		animationEnabled: true,
+		width:            80,
+		height:           24,
+		now:              time.Now,
 	}
 }
 
@@ -91,8 +101,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DeleteResultsMsg:
+		if m.phase == phaseExploding && !m.explosionDone {
+			// Animation still playing: hold the results (REQ-P5).
+			m.pendingResults = msg.Results
+			m.resultsArrived = true
+			return m, nil
+		}
 		m.applyResults(msg)
 		return m, nil
+
+	case explosionTickMsg:
+		if m.phase != phaseExploding || m.explosionDone {
+			return m, nil
+		}
+		m.explosionFrame++
+		if m.explosionFrame >= m.explosionTier.frames {
+			return m.finishExplosion()
+		}
+		return m, explosionTick()
 
 	case tea.MouseClickMsg:
 		if m.visualAnchor >= 0 {
@@ -104,6 +130,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.phase {
 		case phaseConfirming:
 			return m.updateConfirmKey(msg)
+		case phaseExploding:
+			// Any key skips the animation instantly.
+			return m.finishExplosion()
 		case phaseExecuting:
 			return m, nil
 		case phaseSummary:
@@ -113,6 +142,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case phaseBrowsing:
 		}
 		return m.updateKey(msg)
+	}
+	return m, nil
+}
+
+// finishExplosion ends the animation; the summary appears once the results
+// are also in, otherwise a waiting state holds until they arrive.
+func (m Model) finishExplosion() (tea.Model, tea.Cmd) {
+	m.explosionDone = true
+	if m.resultsArrived {
+		m.applyResults(DeleteResultsMsg{Results: m.pendingResults})
+		m.pendingResults = nil
+		m.resultsArrived = false
 	}
 	return m, nil
 }
@@ -260,6 +301,11 @@ func (m Model) View() tea.View {
 	switch m.phase {
 	case phaseConfirming:
 		return tea.NewView(m.viewConfirm())
+	case phaseExploding:
+		if m.explosionDone {
+			return tea.NewView("deleting..." + "\n")
+		}
+		return tea.NewView(m.viewExplosion())
 	case phaseExecuting:
 		return tea.NewView("deleting..." + "\n")
 	case phaseSummary:

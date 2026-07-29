@@ -88,11 +88,11 @@ func TestConfirm_yesProducesExecuteCommand(t *testing.T) {
 	m = apply(t, m, space(), press('d'))
 	next, cmd := m.Update(press('y'))
 	got := next.(Model)
-	if got.phase != phaseExecuting {
-		t.Errorf("phase = %v, want executing", got.phase)
+	if got.phase != phaseExploding {
+		t.Errorf("phase = %v, want exploding (animation on by default)", got.phase)
 	}
 	if cmd == nil {
-		t.Fatal("y should produce the delete command")
+		t.Fatal("y should produce the delete + animation commands")
 	}
 }
 
