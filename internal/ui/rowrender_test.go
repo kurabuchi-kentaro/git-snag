@@ -56,7 +56,7 @@ func TestRenderLeafLine_longBranchTruncatesAndKeepsRightEdge(t *testing.T) {
 		LastCommitTime: time.Unix(1_999_000_000, 0),
 	}
 	const width = 60
-	line := renderLeafLine("", w, strings.Repeat("very-long-segment-", 10), width, time.Unix(2_000_000_000, 0), false)
+	line := renderLeafLine("", w, strings.Repeat("very-long-segment-", 10), width, time.Unix(2_000_000_000, 0), false, false)
 
 	if got := lipgloss.Width(line); got != width {
 		t.Errorf("line width = %d, want %d", got, width)
@@ -79,8 +79,8 @@ func TestRenderLeafLine_emojiTagsDoNotBreakAlignment(t *testing.T) {
 		LastCommitTime: now.Add(-time.Hour),
 	}
 	const width = 60
-	a := renderLeafLine("", plain, "x", width, now, false)
-	b := renderLeafLine("", tagged, "x", width, now, false)
+	a := renderLeafLine("", plain, "x", width, now, false, false)
+	b := renderLeafLine("", tagged, "x", width, now, false, false)
 	if lipgloss.Width(a) != width || lipgloss.Width(b) != width {
 		t.Errorf("widths = %d and %d, want both %d", lipgloss.Width(a), lipgloss.Width(b), width)
 	}

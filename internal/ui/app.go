@@ -26,6 +26,9 @@ type Model struct {
 	filterInput     textinput.Model
 	filtering       bool
 	scanning        bool
+	selection       map[string]bool
+	visualAnchor    int
+	preVisual       map[string]bool
 	width           int
 	height          int
 	now             func() time.Time
@@ -41,6 +44,8 @@ func NewModel() Model {
 		collapsedGroups: map[string]bool{},
 		filterInput:     ti,
 		scanning:        true,
+		selection:       map[string]bool{},
+		visualAnchor:    -1,
 		width:           80,
 		height:          24,
 		now:             time.Now,
@@ -70,14 +75,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case tea.MouseClickMsg:
+		if m.visualAnchor >= 0 {
+			m.confirmVisual()
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	}
 	return m, nil
 }
 
-// updateKey routes key presses, giving the filter input priority when it has
-// focus.
+// updateKey routes key presses. The filter input takes priority when
+// focused; visual mode accepts only its own keys (REQ-A5).
 func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.filtering {
 		switch msg.String() {
@@ -94,6 +105,23 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.visualAnchor >= 0 {
+		switch {
+		case key.Matches(msg, keys.Down):
+			m.moveFocus(1)
+			m.applyVisualRange()
+		case key.Matches(msg, keys.Up):
+			m.moveFocus(-1)
+			m.applyVisualRange()
+		case key.Matches(msg, keys.Visual):
+			m.confirmVisual()
+		case key.Matches(msg, keys.Escape):
+			m.revertVisual()
+		}
+		// Everything else — /, m, s, d, even q — is ignored in visual mode.
+		return m, nil
+	}
+
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
@@ -105,6 +133,17 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.collapseFocused()
 	case key.Matches(msg, keys.Expand):
 		m.expandFocused()
+	case key.Matches(msg, keys.Select):
+		if len(m.rows) > 0 {
+			m.toggleSelection(m.rows[m.focus])
+		}
+	case key.Matches(msg, keys.Visual):
+		if len(m.rows) > 0 {
+			m.enterVisual()
+			m.applyVisualRange()
+		}
+	case key.Matches(msg, keys.Escape):
+		m.selection = map[string]bool{}
 	case key.Matches(msg, keys.Filter):
 		m.filtering = true
 		return m, m.filterInput.Focus()
@@ -206,11 +245,12 @@ func (m Model) View() tea.View {
 			if m.collapsedRepos[row.key] {
 				caret = "▸"
 			}
-			line := fmt.Sprintf("%s %s  %s", caret, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
+			mark := m.selectionMark(row)
+			line := fmt.Sprintf("%s %s %s  %s", caret, mark, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
 			count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
 			line = padBetween(line, styleDim.Render(count), m.width)
 			if focused {
-				line = styleFocused.Render(fmt.Sprintf("%s %s  %s", caret, repo.Name, repo.Path))
+				line = styleFocused.Render(fmt.Sprintf("%s %s %s  %s", caret, mark, repo.Name, repo.Path))
 			}
 			b.WriteString(line + "\n")
 		case rowGroup:
@@ -218,7 +258,7 @@ func (m Model) View() tea.View {
 			if m.collapsedGroups[row.key] {
 				caret = "▸"
 			}
-			line := connectorPrefix(row.isLast) + caret + " " + row.node.Name + "/"
+			line := connectorPrefix(row.isLast) + caret + " " + m.selectionMark(row) + " " + row.node.Name + "/"
 			if focused {
 				line = styleFocused.Render(line)
 			}
@@ -228,7 +268,8 @@ func (m Model) View() tea.View {
 			if !row.flat {
 				prefix = connectorPrefix(row.isLast)
 			}
-			b.WriteString(renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused) + "\n")
+			selected := m.selection[row.node.Worktree.Path]
+			b.WriteString(renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused, selected) + "\n")
 			pathIndent := strings.Repeat(" ", len(prefix))
 			b.WriteString(renderPathLine(pathIndent+"  ", *row.node.Worktree, m.width) + "\n")
 		}
@@ -242,7 +283,22 @@ func (m Model) View() tea.View {
 	return tea.NewView(b.String())
 }
 
-// statusLine summarizes the scan: repo/worktree counts and scan state.
+// selectionMark renders the tri-state indicator of a group or repo row.
+func (m Model) selectionMark(row uiRow) string {
+	switch m.selectionState(row) {
+	case selAll:
+		return "✓"
+	case selPartial:
+		return "◐"
+	case selNone:
+		return "·"
+	default:
+		return "·"
+	}
+}
+
+// statusLine summarizes the scan: repo/worktree counts, scan state, and the
+// current selection.
 func (m Model) statusLine() string {
 	total := 0
 	for i := range m.repos {
@@ -251,6 +307,12 @@ func (m Model) statusLine() string {
 	s := fmt.Sprintf("%d repos · %d worktrees", len(m.repos), total)
 	if m.scanning {
 		s += " · scanning..."
+	}
+	if n := len(m.selection); n > 0 {
+		s += fmt.Sprintf(" · %d selected", n)
+	}
+	if m.visualAnchor >= 0 {
+		s += " · VISUAL"
 	}
 	if m.mergedOnly {
 		s += " · merged only"

@@ -114,11 +114,14 @@ func padBetween(left, right string, width int) string {
 }
 
 // renderLeafLine renders a worktree's first display line: connector prefix,
-// selection mark placeholder, name, then tags and relative time flush right.
-func renderLeafLine(prefix string, w domain.Worktree, name string, width int, now time.Time, focused bool) string {
+// selection mark, name, then tags and relative time flush right.
+func renderLeafLine(prefix string, w domain.Worktree, name string, width int, now time.Time, focused, selected bool) string {
 	mark := "·"
-	if w.Protected() {
+	switch {
+	case w.Protected():
 		mark = "–"
+	case selected:
+		mark = "✓"
 	}
 	left := prefix + mark + " " + name
 	right := strings.TrimSpace(tagsFor(w) + "  " + RelativeTime(w.LastCommitTime, now))

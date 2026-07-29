@@ -8,6 +8,9 @@ type keyMap struct {
 	Down     key.Binding
 	Collapse key.Binding
 	Expand   key.Binding
+	Select   key.Binding
+	Visual   key.Binding
+	Escape   key.Binding
 	Filter   key.Binding
 	Merged   key.Binding
 	Sort     key.Binding
@@ -19,6 +22,9 @@ var keys = keyMap{
 	Down:     key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("↓/j", "move down")),
 	Collapse: key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("←/h", "collapse")),
 	Expand:   key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("→/l", "expand")),
+	Select:   key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
+	Visual:   key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "visual select")),
+	Escape:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
 	Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 	Merged:   key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merged only")),
 	Sort:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
