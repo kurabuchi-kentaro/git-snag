@@ -28,13 +28,19 @@ type Config struct {
 	} `yaml:"animation"`
 }
 
-// DefaultPath returns the XDG-resolved config file location.
+// DefaultPath returns the XDG-resolved config file location. XDG semantics
+// are applied on every platform — including macOS, where os.UserConfigDir
+// would ignore XDG_CONFIG_HOME and point at ~/Library/Application Support —
+// so the documented path (~/.config/git-snag/config.yaml) holds everywhere.
 func DefaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving config directory: %w", err)
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "git-snag", "config.yaml"), nil
 	}
-	return filepath.Join(dir, "git-snag", "config.yaml"), nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "git-snag", "config.yaml"), nil
 }
 
 // Load reads the config file. A missing file is not an error — the tool is

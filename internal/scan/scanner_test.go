@@ -31,7 +31,7 @@ func walkAll(t *testing.T, root string) map[string]bool {
 
 func TestWalk_findsRepositoriesInTree(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	repoA := testutil.NewRepoAt(t, filepath.Join(root, "team", "alpha"))
 	repoB := testutil.NewRepoAt(t, filepath.Join(root, "beta"))
 
@@ -43,7 +43,7 @@ func TestWalk_findsRepositoriesInTree(t *testing.T) {
 
 func TestWalk_skipsDefaultExcludedDirectories(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	testutil.NewRepoAt(t, filepath.Join(root, "node_modules", "stray"))
 	visible := testutil.NewRepoAt(t, filepath.Join(root, "app"))
 
@@ -55,7 +55,7 @@ func TestWalk_skipsDefaultExcludedDirectories(t *testing.T) {
 
 func TestWalk_linkedWorktreeInsideRootIsNotDoubleCounted(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	repo := testutil.NewRepoAt(t, filepath.Join(root, "repo"))
 	wtPath := filepath.Join(root, "repo-wt")
 	repo.Git("worktree", "add", "-q", "-b", "feature/x", wtPath)
@@ -73,7 +73,7 @@ func TestWalk_linkedWorktreeInsideRootIsNotDoubleCounted(t *testing.T) {
 
 func TestWalk_submoduleIsNotDetectedAsRepository(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	sub := testutil.NewRepoAt(t, filepath.Join(root, "lib"))
 	sub.Commit("content")
 	super := testutil.NewRepoAt(t, filepath.Join(root, "app"))
@@ -92,7 +92,7 @@ func TestWalk_submoduleIsNotDetectedAsRepository(t *testing.T) {
 
 func TestWalk_configuredExcludesAreRespected(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	testutil.NewRepoAt(t, filepath.Join(root, "dist", "generated"))
 	visible := testutil.NewRepoAt(t, filepath.Join(root, "src"))
 
@@ -110,7 +110,7 @@ func TestWalk_configuredExcludesAreRespected(t *testing.T) {
 
 func TestWalk_streamsResultsAndHonorsCancellation(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	// "0-repo" sorts first in the lexical walk; the rest is filler the walk
 	// would still be busy with when the first result arrives.
 	testutil.NewRepoAt(t, filepath.Join(root, "0-repo"))
@@ -148,7 +148,7 @@ func TestWalk_streamsResultsAndHonorsCancellation(t *testing.T) {
 
 func TestWalk_noRepositoriesYieldsEmptyResult(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	if err := os.MkdirAll(filepath.Join(root, "just", "dirs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestWalk_unreadableDirectoryIsSkippedNotFatal(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission checks do not apply to root")
 	}
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	locked := filepath.Join(root, "locked")
 	if err := os.MkdirAll(locked, 0o755); err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestWalk_unreadableDirectoryIsSkippedNotFatal(t *testing.T) {
 
 func TestWalk_symlinkLoopIsNotFollowed(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	nested := filepath.Join(root, "a", "b")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)

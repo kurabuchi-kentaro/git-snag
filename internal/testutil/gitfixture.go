@@ -21,7 +21,20 @@ type Repo struct {
 // NewRepo creates a repository with an initial empty commit on `main`.
 func NewRepo(t testing.TB) *Repo {
 	t.Helper()
-	return NewRepoAt(t, t.TempDir())
+	return NewRepoAt(t, TempDir(t))
+}
+
+// TempDir returns a fresh temporary directory with symlinks resolved.
+// On macOS t.TempDir() lives under /var, a symlink to /private/var — but
+// git reports resolved paths, so unresolved fixtures break path comparisons.
+func TempDir(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return dir
+	}
+	return resolved
 }
 
 // NewRepoAt creates a repository at the given path (created if necessary)
@@ -30,6 +43,9 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
 	}
 	r := &Repo{T: t, Dir: dir}
 	r.Git("init", "-q", "-b", "main")
@@ -93,7 +109,7 @@ func (r *Repo) WriteFile(dir, rel, content string) string {
 // AddWorktree creates a linked worktree on a new branch and returns its path.
 func (r *Repo) AddWorktree(branch string) string {
 	r.T.Helper()
-	path := filepath.Join(r.T.TempDir(), strings.ReplaceAll(branch, "/", "-"))
+	path := filepath.Join(TempDir(r.T), strings.ReplaceAll(branch, "/", "-"))
 	r.Git("worktree", "add", "-q", "-b", branch, path)
 	return path
 }
@@ -101,7 +117,7 @@ func (r *Repo) AddWorktree(branch string) string {
 // AddDetachedWorktree creates a linked worktree with a detached HEAD.
 func (r *Repo) AddDetachedWorktree() string {
 	r.T.Helper()
-	path := filepath.Join(r.T.TempDir(), "detached")
+	path := filepath.Join(TempDir(r.T), "detached")
 	r.Git("worktree", "add", "-q", "--detach", path)
 	return path
 }
@@ -110,7 +126,7 @@ func (r *Repo) AddDetachedWorktree() string {
 // main with an upstream, and points origin/HEAD at main.
 func (r *Repo) SetupOrigin() string {
 	r.T.Helper()
-	bare := filepath.Join(r.T.TempDir(), "origin.git")
+	bare := filepath.Join(TempDir(r.T), "origin.git")
 	r.GitIn(r.Dir, "init", "-q", "--bare", bare)
 	r.Git("remote", "add", "origin", bare)
 	r.Git("push", "-q", "-u", "origin", "main")

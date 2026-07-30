@@ -13,7 +13,11 @@ overrides. The tool must also work with no configuration at all.
 ## Decision
 
 Configuration lives in exactly one optional file:
-`$XDG_CONFIG_HOME/git-snag/config.yaml` (via `os.UserConfigDir`). It
+`$XDG_CONFIG_HOME/git-snag/config.yaml`, defaulting to
+`~/.config/git-snag/config.yaml`. XDG semantics are applied on every
+platform — deliberately not `os.UserConfigDir`, which ignores
+`XDG_CONFIG_HOME` on macOS and would move the file to
+`~/Library/Application Support`. It
 currently holds extra scan excludes and the animation toggle. CLI flags
 (`--config` for an alternate path, `--no-animation`) always win over the
 file. A missing file is normal; a present-but-broken file aborts startup

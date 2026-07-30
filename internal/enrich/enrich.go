@@ -25,7 +25,12 @@ type Enricher struct {
 }
 
 // New returns an Enricher that considers cwd the user's current location.
+// Symlinks in cwd are resolved so containment checks match git-reported
+// paths (macOS reports /private/var for /var, for example).
 func New(cwd string) *Enricher {
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
 	return &Enricher{git: gitcli.New(), cwd: cwd}
 }
 
