@@ -1,6 +1,38 @@
-# Development tool versions. Run `mise install` to set up.
+# Development tools and tasks. Run `mise install` once, then `mise run <task>`.
 [tools]
 golangci-lint = "2"
 lefthook = "latest"
 gitleaks = "8"
 goreleaser = "2"
+
+[tasks.build]
+description = "Compile all packages"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run the full test suite"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.fmt]
+description = "Format sources (golangci-lint formatters)"
+run = "golangci-lint fmt"
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.check]
+description = "Everything CI checks: build, vet, lint, test"
+depends = ["build", "vet", "lint", "test"]
+
+[tasks.install]
+description = "Install git-snag into GOBIN (makes `git snag` pick up local changes)"
+run = "go install ./cmd/git-snag"
+
+[tasks.snapshot]
+description = "goreleaser snapshot build (release dry run)"
+run = "goreleaser build --snapshot --clean"

@@ -14,14 +14,16 @@ mise install        # golangci-lint, lefthook, gitleaks, goreleaser
 lefthook install    # git hooks: fast checks on commit, full gate on push
 ```
 
-Day-to-day commands (also available via `make`):
+Day-to-day commands are defined as mise tasks (`mise tasks` lists them):
 
 ```sh
-go build ./...      # compile
-go test ./...       # full test suite
-golangci-lint run   # lint
-golangci-lint fmt   # format
+mise run check     # build + vet + lint + test (what CI runs)
+mise run test      # test suite only
+mise run fmt       # format
+mise run install   # install into GOBIN so `git snag` picks up your changes
 ```
+
+The raw commands (`go test ./...`, `golangci-lint run`, ...) work too.
 
 ## Architecture in one minute
 

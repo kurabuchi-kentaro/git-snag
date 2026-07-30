@@ -33,13 +33,18 @@ a library.
 
 ## Build / test / lint commands
 
+Defined as mise tasks in `mise.toml` (`mise tasks` lists them):
+
 ```sh
-go build ./...          # compile everything
-go vet ./...            # static checks (also runs as part of lint)
-go test ./...           # full test suite
-golangci-lint run       # lint (config: .golangci.yaml)
-golangci-lint fmt       # format (gofumpt etc. via formatters config)
+mise run check          # build + vet + lint + test (what CI runs)
+mise run test           # go test ./...
+mise run lint           # golangci-lint run (config: .golangci.yaml)
+mise run fmt            # golangci-lint fmt (gofumpt etc.)
+mise run install        # go install ./cmd/git-snag (updates `git snag`)
+mise run snapshot       # goreleaser build --snapshot --clean
 ```
+
+The underlying go/golangci-lint commands work directly as well.
 
 ## Hooks and secret scanning
 
