@@ -14,6 +14,13 @@ import (
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
 )
 
+// Key strings shared between the raw handlers (confirm screen, filter
+// input) that bypass the bindings table.
+const (
+	keyUp   = "up"
+	keyDown = "down"
+)
+
 // phase is the top-level UI state machine.
 type phase int
 
@@ -172,6 +179,15 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "esc", "enter":
 			m.filtering = false
 			m.filterInput.Blur()
+			return m, nil
+		case keyUp, keyDown:
+			// fzf-style: arrows move the focus without leaving the input
+			// (j/k stay literal — branch names contain them).
+			if msg.String() == keyDown {
+				m.moveFocus(1)
+			} else {
+				m.moveFocus(-1)
+			}
 			return m, nil
 		default:
 			var cmd tea.Cmd

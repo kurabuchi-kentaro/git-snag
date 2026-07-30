@@ -37,11 +37,11 @@ func (m *Model) buildPlan() []action.PlanItem {
 // updateConfirmKey handles input on the confirmation screen.
 func (m Model) updateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "j", "down":
+	case "j", keyDown:
 		if m.confirmCursor < len(m.confirmItems)-1 {
 			m.confirmCursor++
 		}
-	case "k", "up":
+	case "k", keyUp:
 		if m.confirmCursor > 0 {
 			m.confirmCursor--
 		}

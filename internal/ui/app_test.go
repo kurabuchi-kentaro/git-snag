@@ -212,6 +212,24 @@ func TestUpdate_filterNarrowsRowsIncrementally(t *testing.T) {
 	}
 }
 
+func TestUpdate_arrowsMoveFocusWhileFiltering(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/aa", "feature/ab"))
+	m = apply(t, m, press('/'), press('a'))
+	before := m.focus
+	m = apply(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.focus != before+1 {
+		t.Errorf("focus = %d, want %d (down arrow should move focus during filtering)", m.focus, before+1)
+	}
+	if !m.filtering {
+		t.Error("arrow navigation should not leave the filter input")
+	}
+	m = apply(t, m, press('j'))
+	if m.filter != "aj" {
+		t.Errorf("filter = %q, want %q (j stays literal text)", m.filter, "aj")
+	}
+}
+
 func TestUpdate_filterWithNoMatchesShowsEmptyState(t *testing.T) {
 	t.Parallel()
 	m := modelWith(t, testRepo("alpha", "feature/x"))
