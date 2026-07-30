@@ -97,6 +97,7 @@ func (m *Model) rebuildRows() {
 	if m.focus < 0 {
 		m.focus = 0
 	}
+	m.ensureFocusVisible()
 }
 
 // parentKeyFor derives the collapse target of a node: its parent group when

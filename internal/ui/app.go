@@ -49,6 +49,7 @@ type Model struct {
 	repos           []domain.Repo
 	rows            []uiRow
 	focus           int
+	scrollLine      int
 	collapsedRepos  map[string]bool
 	collapsedGroups map[string]bool
 	sortMode        domain.SortMode
@@ -106,6 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.ensureFocusVisible()
 		return m, nil
 
 	case DeleteResultsMsg:
@@ -258,7 +260,8 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// moveFocus shifts the focused row, clamped at both ends.
+// moveFocus shifts the focused row, clamped at both ends, keeping the
+// focused row inside the visible window.
 func (m *Model) moveFocus(delta int) {
 	m.focus += delta
 	if m.focus < 0 {
@@ -269,6 +272,62 @@ func (m *Model) moveFocus(delta int) {
 	}
 	if m.focus < 0 {
 		m.focus = 0
+	}
+	m.ensureFocusVisible()
+}
+
+// rowHeight is the number of terminal lines one row occupies.
+func rowHeight(r uiRow) int {
+	if r.kind == rowLeaf {
+		return 2 // branch line + path line
+	}
+	return 1
+}
+
+// contentHeight is the number of lines available to the tree pane after the
+// status line, footer, and optional filter input take their share.
+func (m *Model) contentHeight() int {
+	chrome := 4 // status + blank above, blank + footer below
+	if m.filtering || m.filter != "" {
+		chrome++
+	}
+	h := m.height - chrome
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+// ensureFocusVisible scrolls the tree pane so the focused row is fully on
+// screen. Without this, rows past the terminal height would be rendered but
+// clipped — the focus would move invisibly.
+func (m *Model) ensureFocusVisible() {
+	if len(m.rows) == 0 {
+		m.scrollLine = 0
+		return
+	}
+	total := 0
+	start := 0
+	for i, r := range m.rows {
+		if i == m.focus {
+			start = total
+		}
+		total += rowHeight(r)
+	}
+	end := start + rowHeight(m.rows[m.focus])
+	contentH := m.contentHeight()
+
+	if maxScroll := total - contentH; m.scrollLine > maxScroll {
+		m.scrollLine = maxScroll
+	}
+	if m.scrollLine < 0 {
+		m.scrollLine = 0
+	}
+	if start < m.scrollLine {
+		m.scrollLine = start
+	}
+	if end > m.scrollLine+contentH {
+		m.scrollLine = end - contentH
 	}
 }
 
@@ -298,6 +357,7 @@ func (m *Model) collapseFocused() {
 				break
 			}
 		}
+		m.ensureFocusVisible()
 		return
 	}
 	m.rebuildRows()
@@ -355,42 +415,27 @@ func (m Model) View() tea.View {
 		return tea.NewView(b.String())
 	}
 
+	// Render only the rows inside the scroll window: this both keeps the
+	// output within the terminal height (rows past it would be clipped
+	// invisibly) and bounds per-frame work by the screen size instead of
+	// the total worktree count.
+	contentH := m.contentHeight()
+	lineIdx, written := 0, 0
 	for i, row := range m.rows {
-		focused := i == m.focus
-		switch row.kind {
-		case rowRepo:
-			repo := &m.repos[row.repoIdx]
-			caret := "▾"
-			if m.collapsedRepos[row.key] {
-				caret = "▸"
+		h := rowHeight(row)
+		if lineIdx+h <= m.scrollLine {
+			lineIdx += h
+			continue
+		}
+		if written >= contentH {
+			break
+		}
+		for _, line := range m.renderRow(i, row, now) {
+			if lineIdx >= m.scrollLine && written < contentH {
+				b.WriteString(line + "\n")
+				written++
 			}
-			mark := m.selectionMark(row)
-			line := fmt.Sprintf("%s %s %s  %s", caret, mark, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
-			count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
-			line = padBetween(line, styleDim.Render(count), m.width)
-			if focused {
-				line = styleFocused.Render(fmt.Sprintf("%s %s %s  %s", caret, mark, repo.Name, repo.Path))
-			}
-			b.WriteString(line + "\n")
-		case rowGroup:
-			caret := "▾"
-			if m.collapsedGroups[row.key] {
-				caret = "▸"
-			}
-			line := connectorPrefix(row.isLast) + caret + " " + m.selectionMark(row) + " " + row.node.Name + "/"
-			if focused {
-				line = styleFocused.Render(line)
-			}
-			b.WriteString(line + "\n")
-		case rowLeaf:
-			prefix := ""
-			if !row.flat {
-				prefix = connectorPrefix(row.isLast)
-			}
-			selected := m.selection[row.node.Worktree.Path]
-			b.WriteString(renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused, selected) + "\n")
-			pathIndent := strings.Repeat(" ", len(prefix))
-			b.WriteString(renderPathLine(pathIndent+"  ", *row.node.Worktree, m.width) + "\n")
+			lineIdx++
 		}
 	}
 
@@ -400,6 +445,51 @@ func (m Model) View() tea.View {
 	}
 	b.WriteString(m.footer())
 	return tea.NewView(b.String())
+}
+
+// renderRow renders one row into its terminal lines (1 for headers and
+// groups, 2 for leaves).
+func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
+	focused := i == m.focus
+	switch row.kind {
+	case rowRepo:
+		repo := &m.repos[row.repoIdx]
+		caret := "▾"
+		if m.collapsedRepos[row.key] {
+			caret = "▸"
+		}
+		mark := m.selectionMark(row)
+		line := fmt.Sprintf("%s %s %s  %s", caret, mark, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
+		count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
+		line = padBetween(line, styleDim.Render(count), m.width)
+		if focused {
+			line = styleFocused.Render(fmt.Sprintf("%s %s %s  %s", caret, mark, repo.Name, repo.Path))
+		}
+		return []string{line}
+	case rowGroup:
+		caret := "▾"
+		if m.collapsedGroups[row.key] {
+			caret = "▸"
+		}
+		line := connectorPrefix(row.isLast) + caret + " " + m.selectionMark(row) + " " + row.node.Name + "/"
+		if focused {
+			line = styleFocused.Render(line)
+		}
+		return []string{line}
+	case rowLeaf:
+		prefix := ""
+		if !row.flat {
+			prefix = connectorPrefix(row.isLast)
+		}
+		selected := m.selection[row.node.Worktree.Path]
+		pathIndent := strings.Repeat(" ", len(prefix))
+		return []string{
+			renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused, selected),
+			renderPathLine(pathIndent+"  ", *row.node.Worktree, m.width),
+		}
+	default:
+		return nil
+	}
 }
 
 // selectionMark renders the tri-state indicator of a group or repo row.
