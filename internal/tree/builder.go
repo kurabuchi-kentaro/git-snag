@@ -11,8 +11,8 @@ import (
 )
 
 // Node is one element of the display tree. Groups have Children and neither
-// leaf payload; leaves carry the Worktree or Branch they represent. The
-// branch-mode root anchor is the one leaf that also has Children (ADR 0014).
+// leaf payload; leaves carry the Worktree or Branch they represent and never
+// have children.
 type Node struct {
 	// Name is the display label: the path segment for groups, the last
 	// branch segment (or a detached-HEAD label) for tree-mode leaves, and

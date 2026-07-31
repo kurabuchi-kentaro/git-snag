@@ -15,8 +15,7 @@ const (
 // the subtree: worktree paths, or repo-namespaced branch keys. The tree is
 // built from the filtered items, so this is exactly the set of currently
 // *visible* leaves (REQ-A9); collapse state is a display fold and
-// deliberately does not narrow it. The branch-mode root anchor is a leaf
-// with children, so leaves recurse too.
+// deliberately does not narrow it.
 func selectableKeys(repoPath string, n *tree.Node) []string {
 	var out []string
 	switch {
@@ -107,13 +106,17 @@ func (m *Model) enterVisual() {
 
 // toggleVisualExclusion flips the focused leaf in or out of the live visual
 // range: space punches a hole for the one row under the cursor without
-// leaving the mode.
+// leaving the mode. The map only ever holds currently-excluded keys.
 func (m *Model) toggleVisualExclusion() {
 	if m.focus >= len(m.rows) || m.rows[m.focus].kind != rowLeaf {
 		return
 	}
 	key := m.rows[m.focus].key
-	m.visualExcluded[key] = !m.visualExcluded[key]
+	if m.visualExcluded[key] {
+		delete(m.visualExcluded, key)
+	} else {
+		m.visualExcluded[key] = true
+	}
 	m.applyVisualRange()
 }
 
@@ -144,10 +147,8 @@ func (m *Model) applyVisualRange() {
 			m.selection[row.key] = true
 		}
 	}
-	for key, excluded := range m.visualExcluded {
-		if excluded {
-			delete(m.selection, key)
-		}
+	for key := range m.visualExcluded {
+		delete(m.selection, key)
 	}
 }
 
