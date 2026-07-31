@@ -34,13 +34,25 @@ func groupKey(repoPath, groupID string) string {
 	return repoPath + "\x00" + groupID
 }
 
-// rebuildRows recomputes the visible row list from the model's repos,
-// filter, sort mode, and collapse state.
+// branchKey identifies a branch row (and its selection entry) across
+// repositories. Branch names and group IDs cannot collide within a repo:
+// git's ref namespacing forbids a branch "feature" next to "feature/x".
+func branchKey(repoPath, branch string) string {
+	return repoPath + "\x00" + branch
+}
+
+// rebuildRows recomputes the visible row list from the model's repos, view
+// mode, filter, sort mode, and collapse state.
 func (m *Model) rebuildRows() {
 	m.rows = m.rows[:0]
-	if m.sortMode.Flat() {
+	switch {
+	case m.branchMode && m.sortMode.Flat():
+		m.appendGlobalFlatBranchRows()
+	case m.branchMode:
+		m.appendBranchTreeRows()
+	case m.sortMode.Flat():
 		m.appendGlobalFlatRows()
-	} else {
+	default:
 		m.appendTreeRows()
 	}
 	if m.focus >= len(m.rows) {
@@ -143,6 +155,106 @@ func (m *Model) appendGlobalFlatRows() {
 	}
 }
 
+// appendBranchTreeRows renders branch mode's TreeView (ADR 0014): a header
+// per repository, the default branch as the root anchor, and every other
+// branch nested beneath it by slash-delimited name.
+func (m *Model) appendBranchTreeRows() {
+	for idx := range m.repos {
+		repo := &m.repos[idx]
+		visible, ok := m.repoBranches(repo)
+		if !ok {
+			continue
+		}
+		m.rows = append(m.rows, uiRow{
+			kind:    rowRepo,
+			repoIdx: idx,
+			key:     repo.Path,
+		})
+		if m.collapsedRepos[repo.Path] {
+			continue
+		}
+
+		bare := map[string]bool{}
+		for id := range m.collapsedGroups {
+			if repoPath, gid, ok := splitGroupKey(id); ok && repoPath == repo.Path {
+				bare[gid] = true
+			}
+		}
+		anchorID := ""
+		for _, b := range visible {
+			if b.Name == repo.DefaultBranch {
+				anchorID = b.Name
+				break
+			}
+		}
+		for _, r := range tree.Flatten(tree.BuildBranches(visible, repo.DefaultBranch), bare) {
+			row := uiRow{
+				repoIdx: idx,
+				node:    r.Node,
+				isLast:  r.IsLast,
+			}
+			if r.Node.IsGroup() {
+				row.kind = rowGroup
+				row.key = groupKey(repo.Path, r.Node.ID)
+			} else {
+				row.kind = rowLeaf
+				row.key = branchKey(repo.Path, r.Node.ID)
+			}
+			row.parentKey = m.branchParentKeyFor(repo.Path, r.Node, anchorID)
+			m.rows = append(m.rows, row)
+		}
+	}
+}
+
+// branchParentKeyFor derives the collapse target of a branch-mode node: the
+// enclosing group, then the root anchor, then the repository header.
+func (m *Model) branchParentKeyFor(repoPath string, n *tree.Node, anchorID string) string {
+	id := n.ID
+	if n.Branch != nil && n.Branch.Name == anchorID {
+		return repoPath
+	}
+	if i := lastIndexByte(id, '/'); i >= 0 {
+		return groupKey(repoPath, id[:i])
+	}
+	if anchorID != "" {
+		return groupKey(repoPath, anchorID)
+	}
+	return repoPath
+}
+
+// appendGlobalFlatBranchRows renders branch mode's flat sort modes as one
+// repo-spanning candidate list, mirroring appendGlobalFlatRows.
+func (m *Model) appendGlobalFlatBranchRows() {
+	var all []domain.Branch
+	var repoIdxs []int
+	for idx := range m.repos {
+		visible, ok := m.repoBranches(&m.repos[idx])
+		if !ok {
+			continue
+		}
+		for _, b := range visible {
+			all = append(all, b)
+			repoIdxs = append(repoIdxs, idx)
+		}
+	}
+	root := tree.BuildFlatBranches(all, m.sortMode)
+	byPtr := map[*domain.Branch]int{}
+	for i := range all {
+		byPtr[&all[i]] = repoIdxs[i]
+	}
+	for _, r := range tree.Flatten(root, nil) {
+		idx := byPtr[r.Node.Branch]
+		m.rows = append(m.rows, uiRow{
+			kind:    rowLeaf,
+			repoIdx: idx,
+			key:     branchKey(m.repos[idx].Path, r.Node.ID),
+			node:    r.Node,
+			isLast:  r.IsLast,
+			flat:    true,
+		})
+	}
+}
+
 // parentKeyFor derives the collapse target of a node: its parent group when
 // nested, otherwise the repository header.
 func (m *Model) parentKeyFor(repoPath string, n *tree.Node) string {
@@ -202,4 +314,68 @@ func (m *Model) visibleWorktrees(repo *domain.Repo) []domain.Worktree {
 // visibleWorktreeCount counts a repository's worktrees after filtering.
 func (m *Model) visibleWorktreeCount(repo *domain.Repo) int {
 	return len(m.visibleWorktrees(repo))
+}
+
+// visibleBranches is visibleWorktrees for branch mode: the text/merged-or-
+// gone filter, and in flat sort modes only deletable (non-protected)
+// branches remain.
+func (m *Model) visibleBranches(repo *domain.Repo) []domain.Branch {
+	visible := tree.FilterBranches(repo.Branches, m.filter, m.mergedOnly)
+	if !m.sortMode.Flat() {
+		return visible
+	}
+	kept := visible[:0]
+	for _, b := range visible {
+		if b.Protected {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	return kept
+}
+
+// repoBranches is repoWorktrees for branch mode: ok=false hides repos that
+// contribute nothing — no deletable branch at info level 0, or emptied by
+// the filter, merged-or-gone toggle, or the flat modes' candidates-only
+// rule.
+func (m *Model) repoBranches(repo *domain.Repo) ([]domain.Branch, bool) {
+	if m.infoLevel == 0 {
+		deletable := 0
+		for _, b := range repo.Branches {
+			if !b.Protected {
+				deletable++
+			}
+		}
+		if deletable == 0 {
+			return nil, false
+		}
+	}
+	visible := m.visibleBranches(repo)
+	if (m.filter != "" || m.mergedOnly || m.sortMode.Flat()) && len(visible) == 0 {
+		return nil, false
+	}
+	return visible, true
+}
+
+// worktreeByPath returns the repo's worktree at path, or nil.
+func worktreeByPath(repo *domain.Repo, path string) *domain.Worktree {
+	if path == "" {
+		return nil
+	}
+	for i := range repo.Worktrees {
+		if repo.Worktrees[i].Path == path {
+			return &repo.Worktrees[i]
+		}
+	}
+	return nil
+}
+
+// branchByName returns the repo's branch with the given name, or nil.
+func branchByName(repo *domain.Repo, name string) *domain.Branch {
+	for i := range repo.Branches {
+		if repo.Branches[i].Name == name {
+			return &repo.Branches[i]
+		}
+	}
+	return nil
 }

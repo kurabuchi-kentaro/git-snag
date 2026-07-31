@@ -33,13 +33,16 @@ var (
 	styleAccentBold = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleKey        = lipgloss.NewStyle().Bold(true)
 	styleBadge      = lipgloss.NewStyle().Foreground(lipgloss.Color("#f5f2fa")).Background(colorAccent).Bold(true)
-	styleGood       = lipgloss.NewStyle().Foreground(colorGood)
-	styleWarn       = lipgloss.NewStyle().Foreground(colorWarn)
-	styleInfo       = lipgloss.NewStyle().Foreground(colorInfo)
-	styleBad        = lipgloss.NewStyle().Foreground(colorBad)
-	styleSync       = lipgloss.NewStyle().Foreground(colorSync)
-	styleDanger     = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
-	styleModal      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	// styleBadgeInfo marks persistent view modes (blue), as opposed to the
+	// purple styleBadge for transient gestures like visual mode (ADR 0014).
+	styleBadgeInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("#f5f2fa")).Background(colorInfo).Bold(true)
+	styleGood      = lipgloss.NewStyle().Foreground(colorGood)
+	styleWarn      = lipgloss.NewStyle().Foreground(colorWarn)
+	styleInfo      = lipgloss.NewStyle().Foreground(colorInfo)
+	styleBad       = lipgloss.NewStyle().Foreground(colorBad)
+	styleSync      = lipgloss.NewStyle().Foreground(colorSync)
+	styleDanger    = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
+	styleModal     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
 )
 
 // gutterBar marks rows inside the visual-mode range in the one-cell gutter
@@ -56,6 +59,7 @@ type iconSet struct {
 	prunable string
 	current  string
 	main     string
+	gone     string // upstream deleted on the remote (branch mode)
 }
 
 // iconsNerd is the default set and assumes a Nerd Font patched terminal
@@ -69,6 +73,7 @@ var (
 		prunable: "\U000f02a0", // nf-md-ghost
 		current:  "",          // nf-fa-map_marker
 		main:     "",          // nf-fa-home
+		gone:     "",          // nf-fa-chain_broken
 	}
 	iconsUnicode = iconSet{
 		dirty:    "±",
@@ -78,6 +83,7 @@ var (
 		prunable: "†",
 		current:  "●",
 		main:     "⌂",
+		gone:     "↯",
 	}
 )
 

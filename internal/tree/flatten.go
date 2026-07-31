@@ -21,8 +21,9 @@ type Row struct {
 func (r Row) Depth() int { return len(r.IsLast) - 1 }
 
 // Flatten walks the tree in display order and returns the visible rows.
-// Children of groups whose ID is in collapsed are omitted (the group row
-// itself stays visible).
+// Children of collapsed nodes are omitted (the row itself stays visible).
+// Any node with children descends — groups, and the branch-mode root
+// anchor, which is a leaf that carries the subtree (ADR 0014).
 func Flatten(root *Node, collapsed map[string]bool) []Row {
 	var rows []Row
 	var walk func(n *Node, ancestry []bool)
@@ -31,7 +32,7 @@ func Flatten(root *Node, collapsed map[string]bool) []Row {
 			isLast := i == len(n.Children)-1
 			path := append(append([]bool{}, ancestry...), isLast)
 			rows = append(rows, Row{Node: c, IsLast: path})
-			if c.IsGroup() && !collapsed[c.ID] {
+			if len(c.Children) > 0 && !collapsed[c.ID] {
 				walk(c, path)
 			}
 		}
@@ -58,6 +59,27 @@ func Filter(worktrees []domain.Worktree, query string, mergedOnly bool) []domain
 			}
 		}
 		out = append(out, w)
+	}
+	return out
+}
+
+// FilterBranches is Filter for branch mode. mergedOnly matches merged OR
+// upstream-gone branches: in squash-merge workflows the gone state is the
+// working definition of "merged" (ADR 0014).
+func FilterBranches(branches []domain.Branch, query string, mergedOnly bool) []domain.Branch {
+	q := strings.ToLower(query)
+	var out []domain.Branch
+	for _, b := range branches {
+		if mergedOnly && !b.Merged && !b.UpstreamGone {
+			continue
+		}
+		if q != "" {
+			haystack := strings.ToLower(b.Name + " " + b.WorktreePath)
+			if !strings.Contains(haystack, q) {
+				continue
+			}
+		}
+		out = append(out, b)
 	}
 	return out
 }

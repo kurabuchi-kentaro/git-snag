@@ -66,7 +66,10 @@ type Model struct {
 	// the i key: 0 hides single-worktree repos (nothing to delete there)
 	// and the per-worktree path line; 1 also shows single-worktree repos;
 	// 2 also shows the path line.
-	infoLevel    int
+	infoLevel int
+	// branchMode switches the pane from worktrees to local branches
+	// (ADR 0014), toggled by b.
+	branchMode   bool
 	filter       string
 	filterInput  textinput.Model
 	filtering    bool
@@ -306,6 +309,12 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.infoLevel = 2
 		}
 		m.rebuildRows()
+	case key.Matches(msg, keys.Branches):
+		// Selections never survive a mode switch: nothing invisible may
+		// stay pending for deletion (ADR 0014).
+		m.branchMode = !m.branchMode
+		m.selection = map[string]bool{}
+		m.rebuildRows()
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 	}
@@ -342,12 +351,15 @@ func (m *Model) moveFocus(delta int) {
 
 // rowHeight is the number of terminal lines one row occupies. The path line
 // only renders at infoLevel 2 (i, i): below that a leaf is just its branch
-// line.
+// line. Branch leaves without a worktree have no path to show at any level.
 func (m Model) rowHeight(r uiRow) int {
-	if r.kind == rowLeaf && m.infoLevel >= 2 {
-		return 2 // branch line + path line
+	if r.kind != rowLeaf || m.infoLevel < 2 {
+		return 1
 	}
-	return 1
+	if r.node != nil && r.node.Branch != nil && !r.node.Branch.HasWorktree() {
+		return 1
+	}
+	return 2 // branch line + path line
 }
 
 // contentHeight is the number of lines available to the tree pane after the
@@ -410,6 +422,13 @@ func (m *Model) collapseFocused() {
 	case rowGroup:
 		m.collapsedGroups[row.key] = true
 	case rowLeaf:
+		if row.node != nil && len(row.node.Children) > 0 {
+			// The branch-mode root anchor folds its own subtree, like a
+			// group (ADR 0014).
+			m.collapsedGroups[groupKey(m.repos[row.repoIdx].Path, row.node.ID)] = true
+			m.rebuildRows()
+			return
+		}
 		target := row.parentKey
 		if target == "" {
 			// Global flat rows have no enclosing header to collapse.
@@ -445,6 +464,10 @@ func (m *Model) expandFocused() {
 	case rowGroup:
 		delete(m.collapsedGroups, row.key)
 	case rowLeaf:
+		if row.node != nil && len(row.node.Children) > 0 {
+			delete(m.collapsedGroups, groupKey(m.repos[row.repoIdx].Path, row.node.ID))
+			break
+		}
 		return
 	}
 	m.rebuildRows()
@@ -564,6 +587,9 @@ func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 		}
 		mark := m.selectionMark(row)
 		count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
+		if m.branchMode {
+			count = fmt.Sprintf("%d branches", len(m.visibleBranches(repo)))
+		}
 		width := m.width - 1 // gutter
 		fixed := 2 + lipgloss.Width(mark)
 		pathAvail := width - fixed - lipgloss.Width(count) - 1
@@ -607,6 +633,9 @@ func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 			prefix = connectorPrefix(row.isLast)
 			pathPrefix = pathConnectorPrefix(row.isLast) + "  "
 		}
+		if row.node.Branch != nil {
+			return m.renderBranchLeaf(i, row, prefix, pathPrefix, now)
+		}
 		wt := row.node.Worktree
 		st := m.rowStateFor(i, m.selection[wt.Path])
 		st.muted = wt.IsMain || (wt.Branch != "" && wt.Branch == m.repos[row.repoIdx].DefaultBranch)
@@ -620,6 +649,30 @@ func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 	default:
 		return nil
 	}
+}
+
+// renderBranchLeaf renders a branch-mode leaf: the branch name (plus a
+// caret when it is the root anchor carrying the subtree), its worktree's
+// path line at full info level, and the branch/worktree tag cluster.
+func (m Model) renderBranchLeaf(i int, row uiRow, prefix, pathPrefix string, now time.Time) []string {
+	br := row.node.Branch
+	repo := &m.repos[row.repoIdx]
+	st := m.rowStateFor(i, m.selection[row.key])
+	st.muted = br.Protected
+
+	if len(row.node.Children) > 0 || m.collapsedGroups[groupKey(repo.Path, row.node.ID)] {
+		caret := "▾ "
+		if m.collapsedGroups[groupKey(repo.Path, row.node.ID)] {
+			caret = "▸ "
+		}
+		prefix += caret
+	}
+	w := worktreeByPath(repo, br.WorktreePath)
+	lines := []string{renderBranchLine(prefix, *br, w, row.node.Name, m.width, now, st, m.icons)}
+	if m.infoLevel >= 2 && w != nil {
+		lines = append(lines, renderPathLine(pathPrefix, *w, m.width, st))
+	}
+	return lines
 }
 
 // selectionMark returns the tri-state indicator of a group or repo row.
@@ -640,34 +693,53 @@ func (m Model) selectionMark(row uiRow) string {
 // (matching what the tree pane actually shows), scan state, and the current
 // selection. Operational states get the purple accent; the rest stays faint.
 func (m Model) statusLine() string {
-	repos, total, selRepos, selWts := 0, 0, 0, 0
+	unit := "worktrees"
+	if m.branchMode {
+		unit = "branches"
+	}
+	repos, total, selRepos, selItems := 0, 0, 0, 0
 	for i := range m.repos {
-		visible, ok := m.repoWorktrees(&m.repos[i])
-		if !ok {
-			continue
+		repo := &m.repos[i]
+		var keys []string
+		if m.branchMode {
+			visible, ok := m.repoBranches(repo)
+			if !ok {
+				continue
+			}
+			for _, b := range visible {
+				keys = append(keys, branchKey(repo.Path, b.Name))
+			}
+		} else {
+			visible, ok := m.repoWorktrees(repo)
+			if !ok {
+				continue
+			}
+			for _, w := range visible {
+				keys = append(keys, w.Path)
+			}
 		}
 		repos++
-		total += len(visible)
+		total += len(keys)
 		inRepo := 0
-		for _, w := range visible {
-			if m.selection[w.Path] {
+		for _, k := range keys {
+			if m.selection[k] {
 				inRepo++
 			}
 		}
 		if inRepo > 0 {
 			selRepos++
 		}
-		selWts += inRepo
+		selItems += inRepo
 	}
 	sep := styleDim.Render(" · ")
 	// With a pending selection the counts turn into fractions —
 	// 2/4 repos · 5/20 worktrees selected — numerators accented.
-	counts := styleDim.Render(fmt.Sprintf("%d repos · %d worktrees", repos, total))
-	if selWts > 0 {
+	counts := styleDim.Render(fmt.Sprintf("%d repos · %d %s", repos, total, unit))
+	if selItems > 0 {
 		counts = styleAccentBold.Render(fmt.Sprintf("%d", selRepos)) +
 			styleDim.Render(fmt.Sprintf("/%d repos", repos)) + sep +
-			styleAccentBold.Render(fmt.Sprintf("%d", selWts)) +
-			styleDim.Render(fmt.Sprintf("/%d worktrees ", total)) +
+			styleAccentBold.Render(fmt.Sprintf("%d", selItems)) +
+			styleDim.Render(fmt.Sprintf("/%d %s ", total, unit)) +
 			styleAccentBold.Render("selected")
 	}
 	parts := []string{counts}
@@ -721,7 +793,8 @@ func accentHint(k, desc string) string {
 
 // footer renders the key hints. The set swaps with context (ADR 0013):
 // browsing, pending selection, and visual mode each show their own next
-// steps.
+// steps. Badges stack persistent-first: the blue view-mode badge, then the
+// purple gesture badge (ADR 0014).
 func (m Model) footer() string {
 	sep := styleDim.Render("  ·  ")
 	var hints []string
@@ -744,8 +817,12 @@ func (m Model) footer() string {
 		hints = []string{
 			hint("j/k", "move"), hint("space", "select"), hint("v", "visual"),
 			hint("h/l", "collapse"), hint("/", "filter"), hint("m", "merged only"),
-			hint("s", "sort"), hint("i", "info"), hint("?", "help"), hint("q", "quit"),
+			hint("s", "sort"), hint("i", "info"), hint("b", "branches"),
+			hint("?", "help"), hint("q", "quit"),
 		}
+	}
+	if m.branchMode {
+		hints = append([]string{styleBadgeInfo.Render(" BRANCHES ")}, hints...)
 	}
 	return " " + strings.Join(hints, sep)
 }

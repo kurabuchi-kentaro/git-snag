@@ -16,6 +16,7 @@ type keyMap struct {
 	Merged   key.Binding
 	Sort     key.Binding
 	Info     key.Binding
+	Branches key.Binding
 	Help     key.Binding
 	Quit     key.Binding
 }
@@ -33,6 +34,7 @@ var keys = keyMap{
 	Merged:   key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merged only")),
 	Sort:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
 	Info:     key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "cycle info")),
+	Branches: key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branches")),
 	Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }

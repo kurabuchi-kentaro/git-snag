@@ -41,7 +41,8 @@ func (m Model) viewHelp() string {
 	rows := []key.Binding{
 		keys.Up, keys.Down, keys.Collapse, keys.Expand,
 		keys.Select, keys.Visual, keys.Delete, keys.Escape,
-		keys.Filter, keys.Merged, keys.Sort, keys.Info, keys.Help, keys.Quit,
+		keys.Filter, keys.Merged, keys.Sort, keys.Info, keys.Branches,
+		keys.Help, keys.Quit,
 	}
 	for _, binding := range rows {
 		h := binding.Help()
@@ -62,6 +63,7 @@ func (m Model) viewHelp() string {
 		{m.icons.merged, styleGood, "merged into the default branch"},
 		{m.icons.unpushed + "n", styleSync, "n commits not on the remote"},
 		{m.icons.prunable, styleBad, "gone (directory missing)"},
+		{m.icons.gone, styleGood, "upstream deleted on the remote"},
 	}
 	for _, e := range legend {
 		pad := strings.Repeat(" ", max(4-lipgloss.Width(e.glyph), 1))

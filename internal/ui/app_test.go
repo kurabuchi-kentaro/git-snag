@@ -29,8 +29,9 @@ func apply(t *testing.T, m Model, msgs ...tea.Msg) Model {
 
 func testRepo(name string, branches ...string) domain.Repo {
 	repo := domain.Repo{
-		Path: "/work/" + name,
-		Name: name,
+		Path:          "/work/" + name,
+		Name:          name,
+		DefaultBranch: "main",
 	}
 	repo.Worktrees = append(repo.Worktrees, domain.Worktree{
 		Path: "/work/" + name, Branch: "main", IsMain: true,
@@ -44,6 +45,26 @@ func testRepo(name string, branches ...string) domain.Repo {
 			LastCommitTime: time.Unix(1_600_000_000, 0),
 		})
 	}
+	// Mirror the enricher: every worktree branch exists as a local branch,
+	// with the default branch protected.
+	for _, w := range repo.Worktrees {
+		repo.Branches = append(repo.Branches, domain.Branch{
+			Name:           w.Branch,
+			WorktreePath:   w.Path,
+			LastCommitTime: w.LastCommitTime,
+			Protected:      w.IsMain || w.Branch == repo.DefaultBranch,
+		})
+	}
+	return repo
+}
+
+// withBareBranch appends a worktree-less local branch to the repo.
+func withBareBranch(repo domain.Repo, name string, opts ...func(*domain.Branch)) domain.Repo {
+	b := domain.Branch{Name: name, LastCommitTime: time.Unix(1_600_000_000, 0)}
+	for _, o := range opts {
+		o(&b)
+	}
+	repo.Branches = append(repo.Branches, b)
 	return repo
 }
 

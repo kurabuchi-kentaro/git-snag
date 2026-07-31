@@ -17,11 +17,30 @@ type DeleteResultsMsg struct {
 }
 
 // buildPlan turns the current selection into ordered plan items with branch
-// deletion on by default.
+// deletion on by default. In branch mode a selected branch with a worktree
+// becomes the normal worktree-plus-branch item; a bare branch becomes a
+// branch-only item (ADR 0014).
 func (m *Model) buildPlan() []action.PlanItem {
 	var items []action.PlanItem
 	for i := range m.repos {
 		repo := &m.repos[i]
+		if m.branchMode {
+			for _, b := range repo.Branches {
+				if !m.selection[branchKey(repo.Path, b.Name)] {
+					continue
+				}
+				if w := worktreeByPath(repo, b.WorktreePath); w != nil {
+					items = append(items, action.PlanItem{
+						RepoPath:     repo.Path,
+						Worktree:     *w,
+						DeleteBranch: true,
+					})
+				} else {
+					items = append(items, action.PlanItem{RepoPath: repo.Path, Branch: b.Name})
+				}
+			}
+			continue
+		}
 		for _, w := range repo.Worktrees {
 			if m.selection[w.Path] {
 				items = append(items, action.PlanItem{
@@ -48,7 +67,7 @@ func (m Model) updateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "space":
 		it := &m.confirmItems[m.confirmCursor]
-		if !it.Worktree.Detached() {
+		if !it.BranchOnly() && !it.Worktree.Detached() {
 			it.DeleteBranch = !it.DeleteBranch
 		}
 	case "y":
@@ -125,13 +144,18 @@ func (m Model) confirmLines(width int) (lines []string, itemStarts []int) {
 			cursor, cursorStyle = "▸ ", styleAccentBold
 		}
 		branchMark := "[x] delete branch"
-		if it.Worktree.Detached() {
+		switch {
+		case it.BranchOnly():
+			branchMark = "(no worktree)"
+		case it.Worktree.Detached():
 			branchMark = "(detached: no branch)"
-		} else if !it.DeleteBranch {
+		case !it.DeleteBranch:
 			branchMark = "[ ] keep branch"
 		}
 		label := it.Worktree.Branch
-		if it.Worktree.Detached() {
+		if it.BranchOnly() {
+			label = it.Branch
+		} else if it.Worktree.Detached() {
 			label = leafLabel(it)
 		}
 		nameStyle := lipgloss.NewStyle()
@@ -141,8 +165,10 @@ func (m Model) confirmLines(width int) (lines []string, itemStarts []int) {
 		avail := width - 2 - lipgloss.Width(branchMark) - 2
 		lines = append(lines,
 			cursorStyle.Render(cursor)+nameStyle.Render(padLine(truncate(label, max(avail, 1)), max(avail, 1)))+"  "+styleDim.Render(branchMark))
-		lines = append(lines, styleDim.Render(truncate("    "+it.Worktree.Path, width)))
-		for _, warn := range warningsFor(it) {
+		if !it.BranchOnly() {
+			lines = append(lines, styleDim.Render(truncate("    "+it.Worktree.Path, width)))
+		}
+		for _, warn := range m.warningsFor(it) {
 			lines = append(lines, styleWarn.Render(truncate("    "+warn, width)))
 		}
 	}
@@ -171,7 +197,11 @@ func (m Model) viewConfirm() string {
 		offset = min(offset, itemStart)
 	}
 
-	title := styleDanger.Render(fmt.Sprintf("Delete %d worktree(s)?", len(m.confirmItems)))
+	unit := "worktree(s)"
+	if m.branchMode {
+		unit = "branch(es)"
+	}
+	title := styleDanger.Render(fmt.Sprintf("Delete %d %s?", len(m.confirmItems), unit))
 	pos := ""
 	if len(lines) > bodyH {
 		pos = styleDim.Render(fmt.Sprintf("%d/%d", m.confirmCursor+1, len(m.confirmItems)))
@@ -205,9 +235,27 @@ func leafLabel(it action.PlanItem) string {
 }
 
 // warningsFor lists the force-related warnings of one item (ADR 0005: warn,
-// never block).
-func warningsFor(it action.PlanItem) []string {
+// never block). Branch-only items warn from the branch's own state.
+func (m Model) warningsFor(it action.PlanItem) []string {
 	var warns []string
+	if it.BranchOnly() {
+		for i := range m.repos {
+			repo := &m.repos[i]
+			if repo.Path != it.RepoPath {
+				continue
+			}
+			if b := branchByName(repo, it.Branch); b != nil {
+				if !b.Merged && !b.UpstreamGone {
+					warns = append(warns, "⚠ unmerged (will force-delete)")
+				}
+				if b.UnpushedCount > 0 {
+					warns = append(warns, fmt.Sprintf("⚠ %d commit(s) not pushed to the remote", b.UnpushedCount))
+				}
+			}
+			break
+		}
+		return warns
+	}
 	if it.Worktree.Dirty {
 		warns = append(warns, "⚠ has uncommitted changes")
 	}

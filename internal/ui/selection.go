@@ -11,20 +11,26 @@ const (
 	selAll
 )
 
-// selectablePaths collects the worktree paths of every non-protected leaf in
-// the subtree. The tree is built from the filtered worktrees, so this is
-// exactly the set of currently *visible* leaves (REQ-A9); collapse state is
-// a display fold and deliberately does not narrow it.
-func selectablePaths(n *tree.Node) []string {
-	if !n.IsGroup() {
-		if n.Worktree.Protected() {
-			return nil
-		}
-		return []string{n.Worktree.Path}
-	}
+// selectableKeys collects the selection keys of every non-protected leaf in
+// the subtree: worktree paths, or repo-namespaced branch keys. The tree is
+// built from the filtered items, so this is exactly the set of currently
+// *visible* leaves (REQ-A9); collapse state is a display fold and
+// deliberately does not narrow it. The branch-mode root anchor is a leaf
+// with children, so leaves recurse too.
+func selectableKeys(repoPath string, n *tree.Node) []string {
 	var out []string
+	switch {
+	case n.Worktree != nil:
+		if !n.Worktree.Protected() {
+			out = append(out, n.Worktree.Path)
+		}
+	case n.Branch != nil:
+		if !n.Branch.Protected {
+			out = append(out, branchKey(repoPath, n.Branch.Name))
+		}
+	}
 	for _, c := range n.Children {
-		out = append(out, selectablePaths(c)...)
+		out = append(out, selectableKeys(repoPath, c)...)
 	}
 	return out
 }
@@ -36,13 +42,17 @@ func (m *Model) subtreeFor(row uiRow) *tree.Node {
 	if row.node != nil {
 		return row.node
 	}
-	return tree.Build(m.visibleWorktrees(&m.repos[row.repoIdx]))
+	repo := &m.repos[row.repoIdx]
+	if m.branchMode {
+		return tree.BuildBranches(m.visibleBranches(repo), repo.DefaultBranch)
+	}
+	return tree.Build(m.visibleWorktrees(repo))
 }
 
 // toggleSelection implements space: a leaf toggles itself; a group or repo
 // header toggles all its selectable descendants (all-or-nothing).
 func (m *Model) toggleSelection(row uiRow) {
-	paths := selectablePaths(m.subtreeFor(row))
+	paths := selectableKeys(m.repos[row.repoIdx].Path, m.subtreeFor(row))
 	if len(paths) == 0 {
 		return
 	}
@@ -64,7 +74,7 @@ func (m *Model) toggleSelection(row uiRow) {
 
 // selectionState reports the tri-state indicator for a group or repo row.
 func (m *Model) selectionState(row uiRow) selState {
-	paths := selectablePaths(m.subtreeFor(row))
+	paths := selectableKeys(m.repos[row.repoIdx].Path, m.subtreeFor(row))
 	if len(paths) == 0 {
 		return selNone
 	}
@@ -109,8 +119,14 @@ func (m *Model) applyVisualRange() {
 	}
 	for i := lo; i <= hi && i < len(m.rows); i++ {
 		row := m.rows[i]
-		if row.kind == rowLeaf && !row.node.Worktree.Protected() {
-			m.selection[row.node.Worktree.Path] = true
+		if row.kind != rowLeaf {
+			continue
+		}
+		switch n := row.node; {
+		case n.Worktree != nil && !n.Worktree.Protected():
+			m.selection[n.Worktree.Path] = true
+		case n.Branch != nil && !n.Branch.Protected:
+			m.selection[row.key] = true
 		}
 	}
 }

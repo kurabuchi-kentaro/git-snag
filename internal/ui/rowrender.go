@@ -161,6 +161,114 @@ func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
 	return tags
 }
 
+// branchTagParts returns the tag cluster of a branch-mode row: worktree
+// status first (deleting a + branch removes that worktree, so its dirty and
+// locked states are decision inputs), then the branch's own remote state.
+// Muted (protected) rows keep only the home marker, like worktree rows.
+func branchTagParts(b domain.Branch, w *domain.Worktree, ic iconSet, muted bool) []tagPart {
+	if muted {
+		if w != nil && w.IsMain {
+			return []tagPart{{ic.main, styleDim}}
+		}
+		return nil
+	}
+	var tags []tagPart
+	if w != nil {
+		if w.IsCurrent {
+			tags = append(tags, tagPart{ic.current, styleDim})
+		}
+		if w.IsMain {
+			tags = append(tags, tagPart{ic.main, styleDim})
+		}
+		if w.Dirty {
+			tags = append(tags, tagPart{ic.dirty, styleWarn})
+		}
+		if w.Locked {
+			tags = append(tags, tagPart{ic.locked, styleInfo})
+		}
+	}
+	if b.Merged {
+		tags = append(tags, tagPart{ic.merged, styleGood})
+	}
+	if b.UnpushedCount > 0 {
+		tags = append(tags, tagPart{fmt.Sprintf("%s%d", ic.unpushed, b.UnpushedCount), styleSync})
+	}
+	if b.UpstreamGone {
+		tags = append(tags, tagPart{ic.gone, styleGood})
+	}
+	return tags
+}
+
+// renderBranchLine renders a branch-mode leaf line: gutter, prefix, mark,
+// a blue + for worktree-carrying branches (git branch's convention), the
+// branch name in the branch color, then tags and time flush right. Same
+// reserved-right-side budgeting as renderLeafLine.
+func renderBranchLine(prefix string, br domain.Branch, w *domain.Worktree, name string, width int, now time.Time, st rowState, ic iconSet) string {
+	width-- // the gutter owns the first cell
+
+	mark := ""
+	if st.selected {
+		mark = "✓ "
+	}
+	plus := ""
+	if br.HasWorktree() {
+		plus = "+ "
+	}
+
+	rel := RelativeTime(br.LastCommitTime, now)
+	timeStyle := styleDim
+	if rel == relTimeCap {
+		timeStyle = styleWarn
+	}
+	timeStr := fmt.Sprintf("%*s", timeColWidth, rel)
+	tags := branchTagParts(br, w, ic, st.muted)
+	rightWidth := timeColWidth
+	for _, t := range tags {
+		rightWidth += lipgloss.Width(t.text) + 1
+	}
+	if len(tags) > 0 {
+		rightWidth++
+	}
+
+	nameStyle := styleAccent
+	if st.muted {
+		nameStyle = styleDim
+	}
+
+	avail := width - rightWidth - 1 - lipgloss.Width(mark) - lipgloss.Width(plus)
+	if lipgloss.Width(prefix) > avail-8 {
+		prefix = truncate(prefix, max(avail-8, 1))
+	}
+	avail -= lipgloss.Width(prefix)
+	if lipgloss.Width(name) > avail {
+		name = truncate(name, max(avail, 1))
+	}
+
+	used := lipgloss.Width(prefix) + lipgloss.Width(mark) + lipgloss.Width(plus) + lipgloss.Width(name)
+	pad := max(width-used-rightWidth, 1)
+
+	var b strings.Builder
+	b.WriteString(gutter(st))
+	b.WriteString(bgIf(styleDim, st).Render(prefix))
+	if mark != "" {
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(mark))
+	}
+	if plus != "" {
+		b.WriteString(bgIf(styleWorktree, st).Render(plus))
+	}
+	b.WriteString(bgIf(nameStyle, st).Render(name))
+	b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(strings.Repeat(" ", pad)))
+	for _, t := range tags {
+		b.WriteString(bgIf(t.style, st).Render(t.text))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
+	}
+	if len(tags) > 0 {
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
+	}
+	b.WriteString(bgIf(timeStyle, st).Render(timeStr))
+	return b.String()
+}
+
 // truncate shortens plain (unstyled) text to the given display width,
 // appending an ellipsis.
 func truncate(s string, width int) string {

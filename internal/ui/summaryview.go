@@ -7,25 +7,51 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// applyResults removes successfully deleted worktrees from the model and
-// records the results for the summary screen.
+// applyResults removes successfully deleted worktrees and branches from the
+// model and records the results for the summary screen.
 func (m *Model) applyResults(msg DeleteResultsMsg) {
 	m.results = msg.Results
-	deleted := map[string]bool{}
+	deletedWt := map[string]bool{}
+	deletedBranch := map[string]bool{}
 	for _, r := range m.results {
-		if !r.Skipped && r.WorktreeErr == nil {
-			deleted[r.Item.Worktree.Path] = true
+		if r.Skipped {
+			continue
+		}
+		if r.Item.BranchOnly() {
+			if r.BranchErr == nil {
+				deletedBranch[branchKey(r.Item.RepoPath, r.Item.Branch)] = true
+			}
+			continue
+		}
+		if r.WorktreeErr == nil {
+			deletedWt[r.Item.Worktree.Path] = true
+			if r.BranchAttempted && r.BranchErr == nil {
+				deletedBranch[branchKey(r.Item.RepoPath, r.Item.Worktree.Branch)] = true
+			}
 		}
 	}
 	for i := range m.repos {
 		repo := &m.repos[i]
-		kept := repo.Worktrees[:0]
+		keptWt := repo.Worktrees[:0]
 		for _, w := range repo.Worktrees {
-			if !deleted[w.Path] {
-				kept = append(kept, w)
+			if !deletedWt[w.Path] {
+				keptWt = append(keptWt, w)
 			}
 		}
-		repo.Worktrees = kept
+		repo.Worktrees = keptWt
+		keptBr := repo.Branches[:0]
+		for _, b := range repo.Branches {
+			if deletedBranch[branchKey(repo.Path, b.Name)] {
+				continue
+			}
+			if deletedWt[b.WorktreePath] {
+				// The branch survived its worktree (deletion refused or
+				// kept on purpose): it is bare now.
+				b.WorktreePath = ""
+			}
+			keptBr = append(keptBr, b)
+		}
+		repo.Branches = keptBr
 	}
 	m.selection = map[string]bool{}
 	m.rebuildRows()
@@ -40,6 +66,20 @@ func (m Model) summaryLines(width int) []string {
 		lines = append(lines, style.Render(truncate(mark+" "+text, max(width, 1))))
 	}
 	for _, r := range m.results {
+		if r.Item.BranchOnly() {
+			name := r.Item.Branch
+			switch {
+			case r.Skipped:
+				add("–", styleDim, name+": skipped")
+			case r.BranchErr != nil:
+				add("✗", styleBad, fmt.Sprintf("%s: branch deletion failed: %v", name, r.BranchErr))
+			case r.BranchForced:
+				add("✓", styleGood, name+": branch force-deleted (had unmerged commits)")
+			default:
+				add("✓", styleGood, name+": branch deleted")
+			}
+			continue
+		}
 		name := r.Item.Worktree.Branch
 		if r.Item.Worktree.Detached() {
 			name = leafLabel(r.Item)

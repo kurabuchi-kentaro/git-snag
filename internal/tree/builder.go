@@ -10,22 +10,25 @@ import (
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
 )
 
-// Node is one element of the display tree. Groups have Children and no
-// Worktree; leaves carry the Worktree they represent.
+// Node is one element of the display tree. Groups have Children and neither
+// leaf payload; leaves carry the Worktree or Branch they represent. The
+// branch-mode root anchor is the one leaf that also has Children (ADR 0014).
 type Node struct {
 	// Name is the display label: the path segment for groups, the last
 	// branch segment (or a detached-HEAD label) for tree-mode leaves, and
 	// the full branch name for flat-mode leaves.
 	Name string
 	// ID uniquely identifies the node: the joined group path for groups,
-	// the worktree's filesystem path for leaves.
+	// the worktree's filesystem path for worktree leaves, the branch name
+	// for branch leaves.
 	ID       string
 	Children []*Node
 	Worktree *domain.Worktree
+	Branch   *domain.Branch
 }
 
 // IsGroup reports whether the node is a synthetic directory-style group.
-func (n *Node) IsGroup() bool { return n.Worktree == nil }
+func (n *Node) IsGroup() bool { return n.Worktree == nil && n.Branch == nil }
 
 // leafName returns the label of a leaf in tree mode.
 func leafName(w domain.Worktree) string {
@@ -81,6 +84,55 @@ func BuildFlat(worktrees []domain.Worktree, mode domain.SortMode) *Node {
 			Name:     name,
 			ID:       w.Path,
 			Worktree: &worktrees[i],
+		})
+	}
+	sortFlat(root.Children, mode)
+	return root
+}
+
+// BuildBranches constructs the branch-mode hierarchy (ADR 0014): the
+// default branch (when present) becomes the root anchor, with every other
+// branch nested beneath it by slash-delimited name. Without a resolvable
+// default branch the others hang directly off the root. Group IDs stay
+// un-prefixed either way, so collapse keys match the worktree tree's.
+func BuildBranches(branches []domain.Branch, defaultBranch string) *Node {
+	sub := &Node{}
+	var anchor *Node
+	for i := range branches {
+		b := branches[i]
+		if b.Name == defaultBranch {
+			anchor = &Node{Name: b.Name, ID: b.Name, Branch: &branches[i]}
+			continue
+		}
+		node := sub
+		segments := strings.Split(b.Name, "/")
+		for _, seg := range segments[:len(segments)-1] {
+			node = node.childGroup(seg)
+		}
+		node.Children = append(node.Children, &Node{
+			Name:   segments[len(segments)-1],
+			ID:     b.Name,
+			Branch: &branches[i],
+		})
+	}
+	sortTree(sub)
+	if anchor == nil {
+		return sub
+	}
+	anchor.Children = sub.Children
+	return &Node{Children: []*Node{anchor}}
+}
+
+// BuildFlatBranches constructs the flat branch rendering used by non-tree
+// sort modes: every branch is a direct child of the root, labeled with its
+// full name, ordered by mode.
+func BuildFlatBranches(branches []domain.Branch, mode domain.SortMode) *Node {
+	root := &Node{}
+	for i := range branches {
+		root.Children = append(root.Children, &Node{
+			Name:   branches[i].Name,
+			ID:     branches[i].Name,
+			Branch: &branches[i],
 		})
 	}
 	sortFlat(root.Children, mode)
