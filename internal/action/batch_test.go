@@ -40,6 +40,42 @@ func item(repoPath string, w domain.Worktree, deleteBranch bool) PlanItem {
 	return PlanItem{RepoPath: repoPath, Worktree: w, DeleteBranch: deleteBranch}
 }
 
+func TestExecute_branchOnlyItemDeletesBranchAndNothingElse(t *testing.T) {
+	t.Parallel()
+	repo := testutil.NewRepo(t)
+	repo.Git("branch", "merged-bare")
+	keep := repo.AddWorktree("feature/keep")
+
+	results := Execute(t.Context(), []PlanItem{{RepoPath: repo.Dir, Branch: "merged-bare"}})
+	r := results[0]
+	if !r.BranchAttempted || r.BranchErr != nil || r.BranchForced {
+		t.Fatalf("result = %+v, want a clean branch deletion", r)
+	}
+	if branchExists(repo, "merged-bare") {
+		t.Error("merged-bare should be deleted")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("no worktree may be touched by a branch-only item: %v", err)
+	}
+}
+
+func TestExecute_branchOnlyUnmergedEscalatesToForce(t *testing.T) {
+	t.Parallel()
+	repo := testutil.NewRepo(t)
+	wt := repo.AddWorktree("feature/unmerged")
+	repo.CommitIn(wt, "diverge")
+	repo.Git("worktree", "remove", wt)
+
+	results := Execute(t.Context(), []PlanItem{{RepoPath: repo.Dir, Branch: "feature/unmerged"}})
+	r := results[0]
+	if r.BranchErr != nil || !r.BranchForced {
+		t.Fatalf("result = %+v, want a forced (-D) deletion", r)
+	}
+	if branchExists(repo, "feature/unmerged") {
+		t.Error("feature/unmerged should be deleted")
+	}
+}
+
 func TestExecute_removesWorktreeAndBranch(t *testing.T) {
 	t.Parallel()
 	repo := testutil.NewRepo(t)

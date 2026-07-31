@@ -15,11 +15,17 @@ import (
 
 // PlanItem is one confirmed deletion: a worktree, and whether its branch
 // goes with it (the confirmation screen can exclude the branch per item).
+// Alternatively, Branch names a branch-only deletion (branch mode, ADR
+// 0014): no worktree is touched, and Worktree/DeleteBranch stay zero.
 type PlanItem struct {
 	RepoPath     string
 	Worktree     domain.Worktree
 	DeleteBranch bool
+	Branch       string
 }
+
+// BranchOnly reports whether the item deletes a branch without a worktree.
+func (it PlanItem) BranchOnly() bool { return it.Branch != "" }
 
 // Result records what happened to one item. Worktree removal and branch
 // deletion are reported separately (REQ-A8): "worktree gone, branch delete
@@ -53,6 +59,12 @@ func Execute(ctx context.Context, items []PlanItem) []Result {
 			continue
 		}
 
+		if it.BranchOnly() {
+			results[i].BranchAttempted = true
+			results[i].BranchForced, results[i].BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Branch)
+			continue
+		}
+
 		if it.Worktree.Prunable {
 			results[i].WorktreeErr = pruneOnce(ctx, git, prunedRepos, it)
 		} else {
@@ -65,7 +77,7 @@ func Execute(ctx context.Context, items []PlanItem) []Result {
 
 		if it.DeleteBranch && !it.Worktree.Detached() {
 			results[i].BranchAttempted = true
-			results[i].BranchForced, results[i].BranchErr = deleteBranch(ctx, git, it)
+			results[i].BranchForced, results[i].BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Worktree.Branch)
 		}
 	}
 	return results
@@ -131,11 +143,11 @@ func verifyPruned(ctx context.Context, git *gitcli.Client, it PlanItem) error {
 
 // deleteBranch tries a clean -d first and falls back to -D, reporting the
 // escalation so the summary can distinguish clean from forced deletions.
-func deleteBranch(ctx context.Context, git *gitcli.Client, it PlanItem) (forced bool, err error) {
-	if err = git.DeleteBranch(ctx, it.RepoPath, it.Worktree.Branch, false); err == nil {
+func deleteBranch(ctx context.Context, git *gitcli.Client, repoPath, branch string) (forced bool, err error) {
+	if err = git.DeleteBranch(ctx, repoPath, branch, false); err == nil {
 		return false, nil
 	}
-	if forceErr := git.DeleteBranch(ctx, it.RepoPath, it.Worktree.Branch, true); forceErr == nil {
+	if forceErr := git.DeleteBranch(ctx, repoPath, branch, true); forceErr == nil {
 		return true, nil
 	}
 	return false, err
