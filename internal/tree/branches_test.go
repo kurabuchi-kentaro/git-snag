@@ -10,7 +10,6 @@ import (
 func br(name string, opts ...func(*domain.Branch)) domain.Branch {
 	b := domain.Branch{
 		Name:           name,
-		HeadSHA:        "0123456789abcdef0123456789abcdef01234567",
 		LastCommitTime: time.Unix(1_700_000_000, 0),
 	}
 	for _, o := range opts {
@@ -28,9 +27,12 @@ func brGone() func(*domain.Branch)   { return func(b *domain.Branch) { b.Upstrea
 
 func TestBuildBranches_defaultBranchAnchorsTheTree(t *testing.T) {
 	t.Parallel()
-	root := BuildBranches([]domain.Branch{
+	root, anchorID := BuildBranches([]domain.Branch{
 		br("main"), br("feature/x"), br("feature/y"), br("solo"),
 	}, "main")
+	if anchorID != "main" {
+		t.Errorf("anchorID = %q, want main", anchorID)
+	}
 
 	if len(root.Children) != 1 {
 		t.Fatalf("root children = %v, want the anchor only", childNames(root))
@@ -55,7 +57,10 @@ func TestBuildBranches_defaultBranchAnchorsTheTree(t *testing.T) {
 
 func TestBuildBranches_withoutDefaultBranchHangsOffRoot(t *testing.T) {
 	t.Parallel()
-	root := BuildBranches([]domain.Branch{br("a"), br("b")}, "")
+	root, anchorID := BuildBranches([]domain.Branch{br("a"), br("b")}, "")
+	if anchorID != "" {
+		t.Errorf("anchorID = %q, want empty without a default branch", anchorID)
+	}
 	got := childNames(root)
 	if len(got) != 2 {
 		t.Fatalf("root children = %v, want the branches directly", got)
@@ -64,7 +69,7 @@ func TestBuildBranches_withoutDefaultBranchHangsOffRoot(t *testing.T) {
 
 func TestBuildBranches_flattenDescendsThroughAnchor(t *testing.T) {
 	t.Parallel()
-	root := BuildBranches([]domain.Branch{br("main"), br("feature/x")}, "main")
+	root, _ := BuildBranches([]domain.Branch{br("main"), br("feature/x")}, "main")
 	rows := Flatten(root, nil)
 	if len(rows) != 3 { // main, feature/, x
 		t.Fatalf("rows = %d, want 3", len(rows))

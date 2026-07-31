@@ -10,7 +10,7 @@ import (
 )
 
 func goneBranch() func(*domain.Branch) {
-	return func(b *domain.Branch) { b.UpstreamGone = true; b.HasUpstream = true }
+	return func(b *domain.Branch) { b.UpstreamGone = true }
 }
 
 func mergedBranch() func(*domain.Branch) {

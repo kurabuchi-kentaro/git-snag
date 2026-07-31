@@ -69,7 +69,10 @@ type Model struct {
 	infoLevel int
 	// branchMode switches the pane from worktrees to local branches
 	// (ADR 0014), toggled by b.
-	branchMode   bool
+	branchMode bool
+	// wtByPath indexes every repo's worktrees by path, rebuilt with the
+	// rows, so branch-mode renders resolve + rows in O(1) per frame.
+	wtByPath     map[string]*domain.Worktree
 	filter       string
 	filterInput  textinput.Model
 	filtering    bool
@@ -579,13 +582,14 @@ func (m Model) rowStateFor(i int, selected bool) rowState {
 func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 	switch row.kind {
 	case rowRepo:
-		st := m.rowStateFor(i, m.selectionState(row) == selAll)
+		sel := m.selectionState(row)
+		st := m.rowStateFor(i, sel == selAll)
 		repo := &m.repos[row.repoIdx]
 		caret := "▾"
 		if m.collapsedRepos[row.key] {
 			caret = "▸"
 		}
-		mark := m.selectionMark(row)
+		mark := selectionMark(sel)
 		count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
 		if m.branchMode {
 			count = fmt.Sprintf("%d branches", len(m.visibleBranches(repo)))
@@ -609,12 +613,13 @@ func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 		b.WriteString(bgIf(styleDim, st).Render(count))
 		return []string{b.String()}
 	case rowGroup:
-		st := m.rowStateFor(i, m.selectionState(row) == selAll)
+		sel := m.selectionState(row)
+		st := m.rowStateFor(i, sel == selAll)
 		caret := "▾"
 		if m.collapsedGroups[row.key] {
 			caret = "▸"
 		}
-		mark := m.selectionMark(row)
+		mark := selectionMark(sel)
 		var b strings.Builder
 		b.WriteString(gutter(st))
 		b.WriteString(bgIf(styleDim, st).Render(connectorPrefix(row.isLast) + caret + " "))
@@ -667,7 +672,7 @@ func (m Model) renderBranchLeaf(i int, row uiRow, prefix, pathPrefix string, now
 		}
 		prefix += caret
 	}
-	w := worktreeByPath(repo, br.WorktreePath)
+	w := m.wtByPath[br.WorktreePath]
 	lines := []string{renderBranchLine(prefix, *br, w, row.node.Name, m.width, now, st, m.icons)}
 	if m.infoLevel >= 2 && w != nil {
 		lines = append(lines, renderPathLine(pathPrefix, *w, m.width, st))
@@ -678,8 +683,8 @@ func (m Model) renderBranchLeaf(i int, row uiRow, prefix, pathPrefix string, now
 // selectionMark returns the tri-state indicator of a group or repo row.
 // Unselected rows show nothing: the caret already marks these rows, so a
 // placeholder dot would just duplicate it.
-func (m Model) selectionMark(row uiRow) string {
-	switch m.selectionState(row) {
+func selectionMark(sel selState) string {
+	switch sel {
 	case selAll:
 		return "✓ "
 	case selPartial:

@@ -45,6 +45,15 @@ func branchKey(repoPath, branch string) string {
 // mode, filter, sort mode, and collapse state.
 func (m *Model) rebuildRows() {
 	m.rows = m.rows[:0]
+	if m.branchMode {
+		m.wtByPath = map[string]*domain.Worktree{}
+		for i := range m.repos {
+			for j := range m.repos[i].Worktrees {
+				w := &m.repos[i].Worktrees[j]
+				m.wtByPath[w.Path] = w
+			}
+		}
+	}
 	switch {
 	case m.branchMode && m.sortMode.Flat():
 		m.appendGlobalFlatBranchRows()
@@ -81,6 +90,18 @@ func (m *Model) repoWorktrees(repo *domain.Repo) ([]domain.Worktree, bool) {
 	return visible, true
 }
 
+// bareCollapsedGroups translates the repo-namespaced collapsed-group keys
+// down to the bare node IDs tree.Flatten expects.
+func (m *Model) bareCollapsedGroups(repoPath string) map[string]bool {
+	bare := map[string]bool{}
+	for id := range m.collapsedGroups {
+		if p, gid, ok := splitGroupKey(id); ok && p == repoPath {
+			bare[gid] = true
+		}
+	}
+	return bare
+}
+
 // appendTreeRows renders TreeView mode: a header per repository with the
 // branch hierarchy nested beneath it.
 func (m *Model) appendTreeRows() {
@@ -90,24 +111,20 @@ func (m *Model) appendTreeRows() {
 		if !ok {
 			continue
 		}
+		root := tree.Build(visible)
+		// The header row carries the repo's whole tree so selection
+		// gestures and the tri-state mark reuse it instead of rebuilding.
 		m.rows = append(m.rows, uiRow{
 			kind:    rowRepo,
 			repoIdx: idx,
 			key:     repo.Path,
+			node:    root,
 		})
 		if m.collapsedRepos[repo.Path] {
 			continue
 		}
 
-		// tree.Flatten keys collapse state by node ID; translate the
-		// repo-namespaced keys down to bare IDs for this repo.
-		bare := map[string]bool{}
-		for id := range m.collapsedGroups {
-			if repoPath, gid, ok := splitGroupKey(id); ok && repoPath == repo.Path {
-				bare[gid] = true
-			}
-		}
-		for _, r := range tree.Flatten(tree.Build(visible), bare) {
+		for _, r := range tree.Flatten(root, m.bareCollapsedGroups(repo.Path)) {
 			row := uiRow{
 				repoIdx: idx,
 				node:    r.Node,
@@ -165,29 +182,20 @@ func (m *Model) appendBranchTreeRows() {
 		if !ok {
 			continue
 		}
+		root, anchorID := tree.BuildBranches(visible, repo.DefaultBranch)
+		// The header row carries the repo's whole tree so selection
+		// gestures and the tri-state mark reuse it instead of rebuilding.
 		m.rows = append(m.rows, uiRow{
 			kind:    rowRepo,
 			repoIdx: idx,
 			key:     repo.Path,
+			node:    root,
 		})
 		if m.collapsedRepos[repo.Path] {
 			continue
 		}
 
-		bare := map[string]bool{}
-		for id := range m.collapsedGroups {
-			if repoPath, gid, ok := splitGroupKey(id); ok && repoPath == repo.Path {
-				bare[gid] = true
-			}
-		}
-		anchorID := ""
-		for _, b := range visible {
-			if b.Name == repo.DefaultBranch {
-				anchorID = b.Name
-				break
-			}
-		}
-		for _, r := range tree.Flatten(tree.BuildBranches(visible, repo.DefaultBranch), bare) {
+		for _, r := range tree.Flatten(root, m.bareCollapsedGroups(repo.Path)) {
 			row := uiRow{
 				repoIdx: idx,
 				node:    r.Node,
@@ -375,6 +383,16 @@ func branchByName(repo *domain.Repo, name string) *domain.Branch {
 	for i := range repo.Branches {
 		if repo.Branches[i].Name == name {
 			return &repo.Branches[i]
+		}
+	}
+	return nil
+}
+
+// repoByPath returns the repo at path, or nil.
+func repoByPath(repos []domain.Repo, path string) *domain.Repo {
+	for i := range repos {
+		if repos[i].Path == path {
+			return &repos[i]
 		}
 	}
 	return nil

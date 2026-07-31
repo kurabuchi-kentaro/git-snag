@@ -11,15 +11,13 @@ import (
 )
 
 // branchesFormat packs everything branch mode needs into one for-each-ref
-// call: name, head, committer date, upstream name and divergence, and the
-// worktree the branch is checked out in. Tab-separated — git forbids tabs
-// (and all whitespace) in ref names, and %(upstream:track) is the only
-// field with inner spaces.
+// call: name, committer date, upstream divergence, and the worktree the
+// branch is checked out in. Tab-separated — git forbids tabs (and all
+// whitespace) in ref names, and %(upstream:track) is the only field with
+// inner spaces.
 var branchesFormat = strings.Join([]string{
 	"%(refname:short)",
-	"%(objectname)",
 	"%(committerdate:unix)",
-	"%(upstream:short)",
 	"%(upstream:track)",
 	"%(worktreepath)",
 }, "\t")
@@ -38,22 +36,20 @@ func (c *Client) Branches(ctx context.Context, repoPath string) ([]domain.Branch
 			continue
 		}
 		fields := strings.Split(line, "\t")
-		if len(fields) != 6 {
-			return nil, fmt.Errorf("parsing for-each-ref line %q: want 6 fields, got %d", line, len(fields))
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("parsing for-each-ref line %q: want 4 fields, got %d", line, len(fields))
 		}
-		unix, err := strconv.ParseInt(fields[2], 10, 64)
+		unix, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("parsing committer date %q: %w", fields[2], err)
+			return nil, fmt.Errorf("parsing committer date %q: %w", fields[1], err)
 		}
-		track := fields[4]
+		track := fields[2]
 		branches = append(branches, domain.Branch{
 			Name:           fields[0],
-			HeadSHA:        fields[1],
 			LastCommitTime: time.Unix(unix, 0),
-			HasUpstream:    fields[3] != "",
 			UpstreamGone:   track == "[gone]",
 			UnpushedCount:  aheadCount(track),
-			WorktreePath:   fields[5],
+			WorktreePath:   fields[3],
 		})
 	}
 	return branches, nil

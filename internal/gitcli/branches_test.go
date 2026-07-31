@@ -40,18 +40,15 @@ func TestBranches_listsLocalBranchesWithStatus(t *testing.T) {
 	if got["feature/wt"].WorktreePath != wt {
 		t.Errorf("feature/wt.WorktreePath = %q, want %q", got["feature/wt"].WorktreePath, wt)
 	}
-	if b := got["bare"]; b.HasWorktree() || b.HasUpstream {
-		t.Errorf("bare should have no worktree and no upstream: %+v", b)
+	if b := got["bare"]; b.HasWorktree() {
+		t.Errorf("bare should have no worktree: %+v", b)
 	}
-	if b := got["feature/ahead"]; b.UnpushedCount != 1 || !b.HasUpstream || b.UpstreamGone {
-		t.Errorf("feature/ahead should be 1 ahead with a live upstream: %+v", b)
+	if b := got["feature/ahead"]; b.UnpushedCount != 1 || b.UpstreamGone {
+		t.Errorf("feature/ahead should be 1 ahead of a live upstream: %+v", b)
 	}
 	for name, b := range got {
 		if b.LastCommitTime.IsZero() {
 			t.Errorf("%s.LastCommitTime should be set", name)
-		}
-		if b.HeadSHA == "" {
-			t.Errorf("%s.HeadSHA should be set", name)
 		}
 	}
 }
@@ -83,7 +80,7 @@ func TestBranches_repoWithoutOrigin(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("branches = %v, want main and local-only", got)
 	}
-	if got["local-only"].HasUpstream {
-		t.Error("local-only should have no upstream")
+	if got["local-only"].UnpushedCount != 0 || got["local-only"].UpstreamGone {
+		t.Errorf("local-only should have no upstream state: %+v", got["local-only"])
 	}
 }

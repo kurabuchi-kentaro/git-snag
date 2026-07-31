@@ -7,10 +7,8 @@ import "time"
 // out.
 type Branch struct {
 	Name          string
-	HeadSHA       string
 	Merged        bool
 	UnpushedCount int
-	HasUpstream   bool
 	// UpstreamGone reports a configured upstream whose remote branch no
 	// longer exists — the working "merged" signal in squash-merge flows.
 	UpstreamGone   bool

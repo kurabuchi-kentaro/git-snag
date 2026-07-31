@@ -239,11 +239,7 @@ func leafLabel(it action.PlanItem) string {
 func (m Model) warningsFor(it action.PlanItem) []string {
 	var warns []string
 	if it.BranchOnly() {
-		for i := range m.repos {
-			repo := &m.repos[i]
-			if repo.Path != it.RepoPath {
-				continue
-			}
+		if repo := repoByPath(m.repos, it.RepoPath); repo != nil {
 			if b := branchByName(repo, it.Branch); b != nil {
 				if !b.Merged && !b.UpstreamGone {
 					warns = append(warns, "⚠ unmerged (will force-delete)")
@@ -252,7 +248,6 @@ func (m Model) warningsFor(it action.PlanItem) []string {
 					warns = append(warns, fmt.Sprintf("⚠ %d commit(s) not pushed to the remote", b.UnpushedCount))
 				}
 			}
-			break
 		}
 		return warns
 	}

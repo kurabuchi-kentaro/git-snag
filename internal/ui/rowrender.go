@@ -125,17 +125,10 @@ type tagPart struct {
 	style lipgloss.Style
 }
 
-// tagParts returns the status tag cluster for a worktree: bare glyphs, with
-// the text legend living in the help modal. A muted (default-branch)
-// worktree is not a deletion candidate, so its status noise is suppressed —
-// only the home marker remains.
-func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
-	if muted {
-		if w.IsMain {
-			return []tagPart{{ic.main, styleDim}}
-		}
-		return nil
-	}
+// worktreeTagParts emits the tags derived from a worktree's local state:
+// current/main markers, then dirty and locked. Shared between the worktree
+// view and branch mode's + rows.
+func worktreeTagParts(w domain.Worktree, ic iconSet) []tagPart {
 	var tags []tagPart
 	if w.IsCurrent {
 		tags = append(tags, tagPart{ic.current, styleDim})
@@ -149,6 +142,25 @@ func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
 	if w.Locked {
 		tags = append(tags, tagPart{ic.locked, styleInfo})
 	}
+	return tags
+}
+
+// mutedTagParts is the tag cluster of a muted (protected) row: its status
+// noise is suppressed — only the home marker remains.
+func mutedTagParts(w *domain.Worktree, ic iconSet) []tagPart {
+	if w != nil && w.IsMain {
+		return []tagPart{{ic.main, styleDim}}
+	}
+	return nil
+}
+
+// tagParts returns the status tag cluster for a worktree: bare glyphs, with
+// the text legend living in the help modal.
+func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
+	if muted {
+		return mutedTagParts(&w, ic)
+	}
+	tags := worktreeTagParts(w, ic)
 	if w.Merged {
 		tags = append(tags, tagPart{ic.merged, styleGood})
 	}
@@ -164,28 +176,13 @@ func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
 // branchTagParts returns the tag cluster of a branch-mode row: worktree
 // status first (deleting a + branch removes that worktree, so its dirty and
 // locked states are decision inputs), then the branch's own remote state.
-// Muted (protected) rows keep only the home marker, like worktree rows.
 func branchTagParts(b domain.Branch, w *domain.Worktree, ic iconSet, muted bool) []tagPart {
 	if muted {
-		if w != nil && w.IsMain {
-			return []tagPart{{ic.main, styleDim}}
-		}
-		return nil
+		return mutedTagParts(w, ic)
 	}
 	var tags []tagPart
 	if w != nil {
-		if w.IsCurrent {
-			tags = append(tags, tagPart{ic.current, styleDim})
-		}
-		if w.IsMain {
-			tags = append(tags, tagPart{ic.main, styleDim})
-		}
-		if w.Dirty {
-			tags = append(tags, tagPart{ic.dirty, styleWarn})
-		}
-		if w.Locked {
-			tags = append(tags, tagPart{ic.locked, styleInfo})
-		}
+		tags = worktreeTagParts(*w, ic)
 	}
 	if b.Merged {
 		tags = append(tags, tagPart{ic.merged, styleGood})
@@ -197,6 +194,39 @@ func branchTagParts(b domain.Branch, w *domain.Worktree, ic iconSet, muted bool)
 		tags = append(tags, tagPart{ic.gone, styleGood})
 	}
 	return tags
+}
+
+// rightSide computes the reserved right side of a leaf line — the tag
+// cluster plus the fixed time column — returning the formatted time, its
+// style (the capped value carries the warning color: half a year of silence
+// is what this tool hunts), and the total reserved width.
+func rightSide(tags []tagPart, t time.Time, now time.Time) (timeStr string, timeStyle lipgloss.Style, rightWidth int) {
+	rel := RelativeTime(t, now)
+	timeStyle = styleDim
+	if rel == relTimeCap {
+		timeStyle = styleWarn
+	}
+	timeStr = fmt.Sprintf("%*s", timeColWidth, rel)
+	rightWidth = timeColWidth
+	for _, t := range tags {
+		rightWidth += lipgloss.Width(t.text) + 1 // trailing gap before next part
+	}
+	if len(tags) > 0 {
+		rightWidth++ // two-cell gap between tags and the time column
+	}
+	return timeStr, timeStyle, rightWidth
+}
+
+// writeTagsAndTime emits the reserved right side rightSide budgeted for.
+func writeTagsAndTime(b *strings.Builder, tags []tagPart, timeStr string, timeStyle lipgloss.Style, st rowState) {
+	for _, t := range tags {
+		b.WriteString(bgIf(t.style, st).Render(t.text))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
+	}
+	if len(tags) > 0 {
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
+	}
+	b.WriteString(bgIf(timeStyle, st).Render(timeStr))
 }
 
 // renderBranchLine renders a branch-mode leaf line: gutter, prefix, mark,
@@ -215,20 +245,8 @@ func renderBranchLine(prefix string, br domain.Branch, w *domain.Worktree, name 
 		plus = "+ "
 	}
 
-	rel := RelativeTime(br.LastCommitTime, now)
-	timeStyle := styleDim
-	if rel == relTimeCap {
-		timeStyle = styleWarn
-	}
-	timeStr := fmt.Sprintf("%*s", timeColWidth, rel)
 	tags := branchTagParts(br, w, ic, st.muted)
-	rightWidth := timeColWidth
-	for _, t := range tags {
-		rightWidth += lipgloss.Width(t.text) + 1
-	}
-	if len(tags) > 0 {
-		rightWidth++
-	}
+	timeStr, timeStyle, rightWidth := rightSide(tags, br.LastCommitTime, now)
 
 	nameStyle := styleAccent
 	if st.muted {
@@ -258,14 +276,7 @@ func renderBranchLine(prefix string, br domain.Branch, w *domain.Worktree, name 
 	}
 	b.WriteString(bgIf(nameStyle, st).Render(name))
 	b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(strings.Repeat(" ", pad)))
-	for _, t := range tags {
-		b.WriteString(bgIf(t.style, st).Render(t.text))
-		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
-	}
-	if len(tags) > 0 {
-		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
-	}
-	b.WriteString(bgIf(timeStyle, st).Render(timeStr))
+	writeTagsAndTime(&b, tags, timeStr, timeStyle, st)
 	return b.String()
 }
 
@@ -309,23 +320,8 @@ func renderLeafLine(prefix string, w domain.Worktree, name string, width int, no
 		mark = "✓ "
 	}
 
-	// The timestamp gets a fixed right-aligned column so tags end at the
-	// same cell on every row. Half a year of silence is exactly what this
-	// tool hunts, so the capped value carries the warning color.
-	rel := RelativeTime(w.LastCommitTime, now)
-	timeStyle := styleDim
-	if rel == relTimeCap {
-		timeStyle = styleWarn
-	}
-	timeStr := fmt.Sprintf("%*s", timeColWidth, rel)
 	tags := tagParts(w, ic, st.muted)
-	rightWidth := timeColWidth
-	for _, t := range tags {
-		rightWidth += lipgloss.Width(t.text) + 1 // trailing gap before next part
-	}
-	if len(tags) > 0 {
-		rightWidth++ // two-cell gap between tags and the time column
-	}
+	timeStr, timeStyle, rightWidth := rightSide(tags, w.LastCommitTime, now)
 
 	ann := branchAnnotation(w)
 	nameStyle, annStyle := styleWorktree, styleAccent
@@ -370,14 +366,7 @@ func renderLeafLine(prefix string, w domain.Worktree, name string, width int, no
 		b.WriteString(bgIf(annStyle, st).Render(ann))
 	}
 	b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(strings.Repeat(" ", pad)))
-	for _, t := range tags {
-		b.WriteString(bgIf(t.style, st).Render(t.text))
-		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
-	}
-	if len(tags) > 0 {
-		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
-	}
-	b.WriteString(bgIf(timeStyle, st).Render(timeStr))
+	writeTagsAndTime(&b, tags, timeStr, timeStyle, st)
 	return b.String()
 }
 

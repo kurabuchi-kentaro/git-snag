@@ -47,32 +47,56 @@ func (e *Enricher) Enrich(ctx context.Context, repoPath string) (domain.Repo, er
 		return domain.Repo{}, err
 	}
 
-	merged := map[string]bool{}
+	// The repo-wide probes — the branch listing and the two merged sets —
+	// are independent subprocess calls; run them concurrently so each repo
+	// pays one round-trip of latency, not three (repos themselves enrich
+	// serially at the call site).
+	var (
+		repoWg       sync.WaitGroup
+		branches     []domain.Branch
+		branchesErr  error
+		mergedLocal  map[string]bool
+		mergedRemote map[string]bool
+	)
+	repoWg.Add(1)
+	go func() {
+		defer repoWg.Done()
+		branches, branchesErr = e.git.Branches(ctx, repoPath)
+	}()
+
 	defaultBranch, err := e.git.DefaultBranch(ctx, repoPath)
 	switch {
 	case err == nil:
 		repo.DefaultBranch = defaultBranch
-		if m, mergedErr := e.git.MergedBranches(ctx, repoPath, defaultBranch); mergedErr == nil {
-			merged = m
-		}
 		// Merges usually land on the remote (PRs), so the remote-tracking
 		// default is often ahead of an un-pulled local one. Union both
-		// targets so those merges still count; a missing origin/<default>
-		// ref just skips this half.
-		if m, mergedErr := e.git.MergedBranches(ctx, repoPath, "origin/"+defaultBranch); mergedErr == nil {
-			for branch := range m {
-				merged[branch] = true
-			}
-		}
+		// targets so those merges still count; a failing target (e.g. a
+		// missing origin/<default> ref) just skips its half.
+		repoWg.Add(2)
+		go func() {
+			defer repoWg.Done()
+			mergedLocal, _ = e.git.MergedBranches(ctx, repoPath, defaultBranch)
+		}()
+		go func() {
+			defer repoWg.Done()
+			mergedRemote, _ = e.git.MergedBranches(ctx, repoPath, "origin/"+defaultBranch)
+		}()
 	case errors.Is(err, gitcli.ErrNoDefaultBranch):
 		// No origin: merge detection is skipped by contract (ADR 0009).
 	default:
+		repoWg.Wait()
 		return domain.Repo{}, err
 	}
-
-	branches, err := e.git.Branches(ctx, repoPath)
-	if err != nil {
-		return domain.Repo{}, err
+	repoWg.Wait()
+	if branchesErr != nil {
+		return domain.Repo{}, branchesErr
+	}
+	merged := map[string]bool{}
+	for branch := range mergedLocal {
+		merged[branch] = true
+	}
+	for branch := range mergedRemote {
+		merged[branch] = true
 	}
 
 	var wg sync.WaitGroup

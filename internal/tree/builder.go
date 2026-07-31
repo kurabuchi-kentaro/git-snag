@@ -92,10 +92,12 @@ func BuildFlat(worktrees []domain.Worktree, mode domain.SortMode) *Node {
 
 // BuildBranches constructs the branch-mode hierarchy (ADR 0014): the
 // default branch (when present) becomes the root anchor, with every other
-// branch nested beneath it by slash-delimited name. Without a resolvable
-// default branch the others hang directly off the root. Group IDs stay
-// un-prefixed either way, so collapse keys match the worktree tree's.
-func BuildBranches(branches []domain.Branch, defaultBranch string) *Node {
+// branch nested beneath it by slash-delimited name; anchorID names it so
+// callers need not re-derive whether one was built. Without a resolvable
+// default branch the others hang directly off the root and anchorID is
+// empty. Group IDs stay un-prefixed either way, so collapse keys match the
+// worktree tree's.
+func BuildBranches(branches []domain.Branch, defaultBranch string) (root *Node, anchorID string) {
 	sub := &Node{}
 	var anchor *Node
 	for i := range branches {
@@ -117,10 +119,10 @@ func BuildBranches(branches []domain.Branch, defaultBranch string) *Node {
 	}
 	sortTree(sub)
 	if anchor == nil {
-		return sub
+		return sub, ""
 	}
 	anchor.Children = sub.Children
-	return &Node{Children: []*Node{anchor}}
+	return &Node{Children: []*Node{anchor}}, anchor.ID
 }
 
 // BuildFlatBranches constructs the flat branch rendering used by non-tree

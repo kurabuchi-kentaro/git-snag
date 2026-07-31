@@ -35,16 +35,17 @@ func selectableKeys(repoPath string, n *tree.Node) []string {
 	return out
 }
 
-// subtreeFor returns the node a selection gesture acts on: the row's own
-// node, or the repository's whole (filtered) tree for a header row.
-// Headers only exist in tree mode — the global flat list has none.
+// subtreeFor returns the node a selection gesture acts on. Every row —
+// including repo headers, which carry their repo's whole tree — stores its
+// node at rebuild time; building here is a fallback for safety.
 func (m *Model) subtreeFor(row uiRow) *tree.Node {
 	if row.node != nil {
 		return row.node
 	}
 	repo := &m.repos[row.repoIdx]
 	if m.branchMode {
-		return tree.BuildBranches(m.visibleBranches(repo), repo.DefaultBranch)
+		root, _ := tree.BuildBranches(m.visibleBranches(repo), repo.DefaultBranch)
+		return root
 	}
 	return tree.Build(m.visibleWorktrees(repo))
 }
@@ -122,10 +123,12 @@ func (m *Model) applyVisualRange() {
 		if row.kind != rowLeaf {
 			continue
 		}
-		switch n := row.node; {
-		case n.Worktree != nil && !n.Worktree.Protected():
-			m.selection[n.Worktree.Path] = true
-		case n.Branch != nil && !n.Branch.Protected:
+		// A leaf's row key is its selection key in both modes: the
+		// worktree path, or the repo-namespaced branch key.
+		n := row.node
+		protected := (n.Worktree != nil && n.Worktree.Protected()) ||
+			(n.Branch != nil && n.Branch.Protected)
+		if !protected {
 			m.selection[row.key] = true
 		}
 	}
