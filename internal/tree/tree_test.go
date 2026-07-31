@@ -269,8 +269,7 @@ func TestFilter_branchSubstringKeepsLeafAndDropsEmptyGroups(t *testing.T) {
 		t.Fatalf("Filter = %+v, want only feature/rate-limit", got)
 	}
 	root := Build(got)
-	// The lone survivor compacts into a single root-level leaf.
-	if len(root.Children) != 1 || root.Children[0].Name != "feature/rate-limit" {
+	if len(root.Children) != 1 || root.Children[0].Name != "feature" {
 		t.Errorf("groups without matching leaves should vanish: %v", childNames(root))
 	}
 }

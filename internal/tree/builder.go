@@ -65,7 +65,6 @@ func Build(worktrees []domain.Worktree) *Node {
 			Worktree: &worktrees[i],
 		})
 	}
-	compactSingles(root)
 	sortTree(root)
 	return root
 }
@@ -75,6 +74,10 @@ func Build(worktrees []domain.Worktree) *Node {
 // feature/uc1-backend renders as one row instead of spending a row and an
 // indent level on a feature/ group that disambiguates nothing. Bottom-up,
 // so whole single-child chains collapse into a single label.
+//
+// Branch mode only: branch rows display the node name, so the folded
+// prefix stays visible. Worktree rows display the directory basename —
+// folding there would erase the namespace from the screen entirely.
 func compactSingles(n *Node) {
 	for i, c := range n.Children {
 		if !c.IsGroup() {

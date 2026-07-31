@@ -77,13 +77,14 @@ func TestBuildBranches_compactsSingleChildNamespaces(t *testing.T) {
 	}
 }
 
-func TestBuild_compactsSingleChildNamespaces(t *testing.T) {
+func TestBuild_keepsSingleChildNamespaces(t *testing.T) {
 	t.Parallel()
-	root := Build([]domain.Worktree{wt("feature/only"), wt("fix/a"), wt("fix/b")})
-	got := childNames(root)
-	want := []string{"feature/only", "fix"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("root children = %v, want %v", got, want)
+	// Worktree rows display directory basenames, so a folded namespace
+	// would vanish from the screen — the worktree tree never compacts.
+	root := Build([]domain.Worktree{wt("feature/only")})
+	feature := findChild(t, root, "feature")
+	if !feature.IsGroup() || len(feature.Children) != 1 {
+		t.Fatalf("feature should stay a group: %v", childNames(root))
 	}
 }
 

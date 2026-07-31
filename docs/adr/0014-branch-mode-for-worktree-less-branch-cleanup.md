@@ -9,8 +9,10 @@ selection-propagation rule of the anchor row unreadable (does space on
 main select everything beneath it?). The default branch now renders as a
 muted sibling pinned first — the same shape as the worktree view. The same
 review added single-child namespace compaction (VS Code's compact-folders
-convention) to both trees: a namespace that disambiguates nothing folds
-into its child's label, e.g. `feature/uc1-backend` as one row.
+convention) to the branch tree: a namespace that disambiguates nothing
+folds into its child's label, e.g. `feature/uc1-backend` as one row. The
+worktree tree keeps its groups — its rows display directory basenames, so
+a folded namespace would vanish from the screen entirely.
 
 ## Context
 
