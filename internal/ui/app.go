@@ -81,9 +81,12 @@ type Model struct {
 	selection    map[string]bool
 	visualAnchor int
 	preVisual    map[string]bool
-	width        int
-	height       int
-	now          func() time.Time
+	// visualExcluded holds rows punched out of the live visual range with
+	// space; cleared whenever the mode is entered or left.
+	visualExcluded map[string]bool
+	width          int
+	height         int
+	now            func() time.Time
 }
 
 // NewModel returns an empty model waiting for RepoFoundMsg streams.
@@ -256,6 +259,10 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.applyVisualRange()
 		case key.Matches(msg, keys.Visual):
 			m.confirmVisual()
+		case key.Matches(msg, keys.Select):
+			// space punches the cursor row out of the range (or back in)
+			// without leaving the mode.
+			m.toggleVisualExclusion()
 		case key.Matches(msg, keys.Delete):
 			// d keeps the range and goes straight to the confirm modal.
 			m.confirmVisual()
@@ -788,8 +795,9 @@ func (m Model) footer() string {
 	case m.visualAnchor >= 0:
 		hints = []string{
 			styleBadge.Render(" VISUAL "),
-			hint("j/k", "extend"), hint("v", "confirm"),
-			accentHint("d", "delete"), hint("esc", "cancel"),
+			hint("j/k", "extend"), hint("space", "exclude"),
+			hint("v", "confirm"), accentHint("d", "delete"),
+			hint("esc", "cancel"),
 		}
 	case len(m.selection) > 0:
 		// The status line already counts the selection; the footer just

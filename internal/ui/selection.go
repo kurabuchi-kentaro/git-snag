@@ -98,10 +98,23 @@ func (m *Model) selectionState(row uiRow) selState {
 // selection; see ADR 0006).
 func (m *Model) enterVisual() {
 	m.visualAnchor = m.focus
+	m.visualExcluded = map[string]bool{}
 	m.preVisual = make(map[string]bool, len(m.selection))
 	for p := range m.selection {
 		m.preVisual[p] = true
 	}
+}
+
+// toggleVisualExclusion flips the focused leaf in or out of the live visual
+// range: space punches a hole for the one row under the cursor without
+// leaving the mode.
+func (m *Model) toggleVisualExclusion() {
+	if m.focus >= len(m.rows) || m.rows[m.focus].kind != rowLeaf {
+		return
+	}
+	key := m.rows[m.focus].key
+	m.visualExcluded[key] = !m.visualExcluded[key]
+	m.applyVisualRange()
 }
 
 // applyVisualRange recomputes the live selection: everything selected before
@@ -131,12 +144,18 @@ func (m *Model) applyVisualRange() {
 			m.selection[row.key] = true
 		}
 	}
+	for key, excluded := range m.visualExcluded {
+		if excluded {
+			delete(m.selection, key)
+		}
+	}
 }
 
 // confirmVisual keeps the range selection and leaves visual mode.
 func (m *Model) confirmVisual() {
 	m.visualAnchor = -1
 	m.preVisual = nil
+	m.visualExcluded = nil
 }
 
 // revertVisual restores the pre-visual selection and leaves visual mode.
@@ -147,4 +166,5 @@ func (m *Model) revertVisual() {
 	}
 	m.visualAnchor = -1
 	m.preVisual = nil
+	m.visualExcluded = nil
 }

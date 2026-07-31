@@ -185,6 +185,66 @@ func TestSelection_persistsAcrossFilterAndSortChanges(t *testing.T) {
 
 // --- Visual mode ---
 
+func TestVisual_spaceExcludesCursorRowFromRange(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b", "feature/c"))
+	focusOn(t, &m, leafNamed("a"))
+	// Extend over b, punch it out in passing, keep extending to c.
+	m = apply(t, m, press('v'), press('j'), space())
+	if m.visualAnchor == -1 {
+		t.Fatal("space must not leave visual mode")
+	}
+	if got := selectedBranches(m); got["feature/b"] {
+		t.Errorf("space should exclude the cursor row: %v", got)
+	}
+	m = apply(t, m, press('j'))
+	got := selectedBranches(m)
+	if got["feature/b"] {
+		t.Errorf("exclusion should survive range recomputation: %v", got)
+	}
+	if !got["feature/a"] || !got["feature/c"] {
+		t.Errorf("the rest of the range must stay selected: %v", got)
+	}
+	// A second space on the same row re-includes it.
+	m = apply(t, m, press('k'), space())
+	if got := selectedBranches(m); !got["feature/b"] {
+		t.Errorf("second space should re-include the row: %v", got)
+	}
+}
+
+func TestVisual_escapeDropsExclusionsWithTheRange(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b"))
+	// Pre-select b, enter visual over a..b, exclude b, then cancel.
+	focusOn(t, &m, leafNamed("b"))
+	m = apply(t, m, space())
+	focusOn(t, &m, leafNamed("a"))
+	m = apply(t, m, press('v'), press('j'), space(), esc())
+	if got := selectedBranches(m); !got["feature/b"] {
+		t.Errorf("esc should restore the pre-visual selection untouched: %v", got)
+	}
+	// And a fresh visual pass starts with no stale exclusions.
+	focusOn(t, &m, leafNamed("a"))
+	m = apply(t, m, press('v'), press('j'), press('v'))
+	if got := selectedBranches(m); !got["feature/a"] || !got["feature/b"] {
+		t.Errorf("exclusions must not leak into the next visual pass: %v", got)
+	}
+}
+
+func TestVisual_confirmKeepsExclusions(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b", "feature/c"))
+	focusOn(t, &m, leafNamed("a"))
+	m = apply(t, m, press('v'), press('j'), space(), press('j'), press('v'))
+	got := selectedBranches(m)
+	if got["feature/b"] {
+		t.Errorf("v should keep the exclusion in the final selection: %v", got)
+	}
+	if !got["feature/a"] || !got["feature/c"] {
+		t.Errorf("the rest of the range should be selected: %v", got)
+	}
+}
+
 func TestVisual_confirmAddsRangeToExistingSelection(t *testing.T) {
 	t.Parallel()
 	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b", "feature/c"))
