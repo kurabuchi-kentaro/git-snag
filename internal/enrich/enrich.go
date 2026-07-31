@@ -70,6 +70,11 @@ func (e *Enricher) Enrich(ctx context.Context, repoPath string) (domain.Repo, er
 		return domain.Repo{}, err
 	}
 
+	branches, err := e.git.Branches(ctx, repoPath)
+	if err != nil {
+		return domain.Repo{}, err
+	}
+
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxConcurrentWorktrees)
 	for i := range worktrees {
@@ -84,6 +89,20 @@ func (e *Enricher) Enrich(ctx context.Context, repoPath string) (domain.Repo, er
 	wg.Wait()
 
 	repo.Worktrees = worktrees
+	// Branch protection derives from the worktrees, so it must wait for
+	// the pool above to settle IsCurrent.
+	protectedWt := map[string]bool{}
+	for _, w := range worktrees {
+		if w.Protected() {
+			protectedWt[w.Path] = true
+		}
+	}
+	for i := range branches {
+		b := &branches[i]
+		b.Merged = merged[b.Name]
+		b.Protected = b.Name == repo.DefaultBranch || protectedWt[b.WorktreePath]
+	}
+	repo.Branches = branches
 	return repo, nil
 }
 

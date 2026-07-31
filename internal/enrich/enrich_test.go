@@ -79,6 +79,52 @@ func TestEnrich_mergedSeesRemoteDefaultAheadOfLocal(t *testing.T) {
 	}
 }
 
+func TestEnrich_populatesBranchesWithMergedFlags(t *testing.T) {
+	t.Parallel()
+	fx := testutil.NewRepo(t)
+	fx.SetupOrigin()
+	fx.Git("branch", "merged-bare")
+	un := fx.AddWorktree("feature/unmerged")
+	fx.CommitIn(un, "diverge")
+
+	repo := enriched(t, fx.Dir, t.TempDir())
+	byName := map[string]domain.Branch{}
+	for _, b := range repo.Branches {
+		byName[b.Name] = b
+	}
+	if len(byName) != 3 {
+		t.Fatalf("Branches = %v, want main, merged-bare, feature/unmerged", byName)
+	}
+	if !byName["merged-bare"].Merged {
+		t.Error("merged-bare should carry the merged flag")
+	}
+	if b := byName["feature/unmerged"]; b.Merged || b.WorktreePath != un {
+		t.Errorf("feature/unmerged should be unmerged with its worktree path: %+v", b)
+	}
+	if byName["merged-bare"].HasWorktree() {
+		t.Error("merged-bare should have no worktree")
+	}
+	if !byName["main"].Protected {
+		t.Error("the default branch should be protected")
+	}
+	if byName["feature/unmerged"].Protected || byName["merged-bare"].Protected {
+		t.Error("deletable branches must not be protected")
+	}
+}
+
+func TestEnrich_branchInCurrentWorktreeIsProtected(t *testing.T) {
+	t.Parallel()
+	fx := testutil.NewRepo(t)
+	wt := fx.AddWorktree("feature/here")
+
+	repo := enriched(t, fx.Dir, wt) // cwd inside the worktree
+	for _, b := range repo.Branches {
+		if b.Name == "feature/here" && !b.Protected {
+			t.Error("the current worktree's branch should be protected")
+		}
+	}
+}
+
 func TestEnrich_unpushedCountsOnlyWithUpstream(t *testing.T) {
 	t.Parallel()
 	fx := testutil.NewRepo(t)
