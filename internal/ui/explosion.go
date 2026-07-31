@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The explosion animation is adapted from lazygit's "Nuke working tree"
@@ -86,22 +87,30 @@ func renderExplodeFrame(width, height, frame int, tier explosionTier, seed int64
 	return b.String()
 }
 
-// viewExplosion renders the current animation frame, jittering the whole
-// pane on the big tier.
+// explosionStyles cycles white → yellow → red as the burst progresses,
+// echoing lazygit's palette within the ANSI-based scheme of ADR 0013.
+var explosionStyles = []lipgloss.Style{
+	lipgloss.NewStyle(),
+	styleWarn,
+	styleBad,
+}
+
+// viewExplosion renders the current animation frame inside the delete
+// modal's act frame (ADR 0013: the blast stays inside the window,
+// lazygit-style, instead of taking over the screen).
 func (m Model) viewExplosion() string {
-	height := m.height - 4
-	if height < 5 {
-		height = 5
-	}
-	width := m.width
-	if width < 10 {
-		width = 10
-	}
+	width, height := m.actWidth(), m.actHeight(modalChromeLines+1)
 	img := renderExplodeFrame(width, height, m.explosionFrame, m.explosionTier, m.explosionSeed)
-	if m.explosionTier.shake {
-		// #nosec G404 -- visual jitter only.
-		rng := rand.New(rand.NewSource(m.explosionSeed - int64(m.explosionFrame)))
-		img = strings.Repeat("\n", rng.Intn(2)) + strings.Repeat(" ", rng.Intn(3)) + img
+	style := explosionStyles[m.explosionFrame*len(explosionStyles)/(m.explosionTier.frames+1)%len(explosionStyles)]
+	return style.Render(img)
+}
+
+// explosionJitter shakes the modal frame by a cell or two on the big tier.
+func (m Model) explosionJitter() (dx, dy int) {
+	if !m.explosionTier.shake {
+		return 0, 0
 	}
-	return img
+	// #nosec G404 -- visual jitter only.
+	rng := rand.New(rand.NewSource(m.explosionSeed - int64(m.explosionFrame)))
+	return rng.Intn(3) - 1, rng.Intn(2)
 }

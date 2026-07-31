@@ -66,3 +66,14 @@ func TestRun_customConfigPathIsActuallyLoaded(t *testing.T) {
 		t.Errorf("stderr = %q, want it to reference the custom config", stderr.String())
 	}
 }
+
+func TestRun_invalidIconSetFailsWithMessage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--icons", "emoji", t.TempDir()}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("unknown icon set should exit non-zero")
+	}
+	if !strings.Contains(stderr.String(), "icon set") {
+		t.Errorf("stderr = %q, want an icon-set error message", stderr.String())
+	}
+}

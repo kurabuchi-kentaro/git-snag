@@ -26,6 +26,11 @@ type Config struct {
 	Animation struct {
 		Enabled *bool `yaml:"enabled"`
 	} `yaml:"animation"`
+	UI struct {
+		// Icons selects the status glyph set: "nerd" (default, needs a
+		// Nerd Font) or "unicode" (plain symbols). ADR 0013.
+		Icons string `yaml:"icons"`
+	} `yaml:"ui"`
 }
 
 // DefaultPath returns the XDG-resolved config file location. XDG semantics
@@ -77,4 +82,14 @@ func Resolve(cfg Config, noAnimationFlag bool) (excludes map[string]bool, animat
 		animation = false
 	}
 	return excludes, animation
+}
+
+// ResolveIcons combines the config's ui.icons with the --icons flag (the
+// flag wins). It returns the effective set name; validity is checked by
+// the caller against the UI's known sets.
+func ResolveIcons(cfg Config, iconsFlag string) string {
+	if iconsFlag != "" {
+		return iconsFlag
+	}
+	return cfg.UI.Icons
 }

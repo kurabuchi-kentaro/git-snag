@@ -23,14 +23,18 @@ and branch together, across every repository under your current directory.
   and select as a unit.
 - **Shows what makes a worktree deletable** at a glance:
 
-  | tag | meaning |
-  |---|---|
-  | ✅ | merged into the default branch (origin/HEAD) |
-  | 📝 | uncommitted changes |
-  | ⬆️ | commits not pushed to the upstream |
-  | 🔒 | locked via `git worktree lock` |
-  | 👻 | directory gone; only git metadata remains (prunable) |
-  | 🏠 / 📍 | main worktree / the one you're in — never selectable |
+  | tag (nerd / unicode) | color | meaning |
+  |---|---|---|
+  | ` merged` / `✓ merged` | green | merged into the default branch (origin/HEAD) |
+  | ` dirty` / `± dirty` | yellow | uncommitted changes |
+  | `↑3` | cyan | commits not pushed to the upstream (with count) |
+  | ` locked` / `⊘ locked` | blue | locked via `git worktree lock` |
+  | `󰊠 gone` / `† gone` | red | directory gone; only git metadata remains (prunable) |
+  | ` ` / `⌂ ●` | faint | main worktree / the one you're in — never selectable |
+
+  Tags render with Nerd Font glyphs by default; set `icons: unicode` in the
+  config (or pass `--icons unicode`) for plain-Unicode symbols if your
+  terminal font is not patched.
 
 - **Sorts to find candidates**: cycle tree view → oldest-first →
   newest-first → merged-first. Non-tree modes render flat with full branch
@@ -65,9 +69,10 @@ WSL.
 ## Usage
 
 ```sh
-git snag                 # scan below the current directory
-git snag ~/projects      # scan below a specific root
-git snag --no-animation  # calm mode
+git snag                  # scan below the current directory
+git snag ~/projects       # scan below a specific root
+git snag --no-animation   # calm mode
+git snag --icons unicode  # no Nerd Font required
 ```
 
 ### Keybindings
@@ -95,6 +100,8 @@ scan:
   excludes: [dist, build] # extra directory names to skip while scanning
 animation:
   enabled: false          # same effect as --no-animation
+ui:
+  icons: unicode          # "nerd" (default) or "unicode"; --icons wins
 ```
 
 ## Known limitations
@@ -102,7 +109,7 @@ animation:
 - Bare repositories (`git clone --bare` + worktrees) are not discovered in
   v0.1 — see `docs/adr/0011`.
 - Merge detection needs an `origin` remote; local-only repositories simply
-  show no ✅ tags.
+  show no merged tags.
 
 ## Contributing
 

@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/kurabuchi-kentaro/git-snag/internal/action"
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
@@ -45,6 +46,12 @@ type Model struct {
 	explosionDone    bool
 	explosionTier    explosionTier
 	explosionSeed    int64
+	// The delete flow renders as three acts in one modal (ADR 0013); the
+	// frame's interior size is fixed when the confirm opens.
+	modalW        int
+	modalH        int
+	summaryScroll int
+	icons         iconSet
 
 	repos           []domain.Repo
 	rows            []uiRow
@@ -72,6 +79,11 @@ func NewModel() Model {
 	ti := textinput.New()
 	ti.Placeholder = "filter by branch or path"
 	ti.Prompt = "/ "
+	// The filter prompt is an operation, so it carries the accent (ADR 0013).
+	styles := ti.Styles()
+	styles.Focused.Prompt = styleAccentBold
+	styles.Blurred.Prompt = styleAccent
+	ti.SetStyles(styles)
 	return Model{
 		collapsedRepos:   map[string]bool{},
 		collapsedGroups:  map[string]bool{},
@@ -83,6 +95,7 @@ func NewModel() Model {
 		width:            80,
 		height:           24,
 		now:              time.Now,
+		icons:            iconsNerd,
 	}
 }
 
@@ -108,6 +121,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ensureFocusVisible()
+		// The delete-flow modal keeps its size across acts but must never
+		// outgrow a shrunken terminal.
+		m.modalW = min(m.modalW, modalInteriorWidth(m.width))
+		m.modalH = min(m.modalH, m.height-6)
 		return m, nil
 
 	case DeleteResultsMsg:
@@ -146,8 +163,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case phaseExecuting:
 			return m, nil
 		case phaseSummary:
+			// j/k scroll a long summary; anything else closes it.
+			switch msg.String() {
+			case "j", keyDown:
+				w := m.actWidth()
+				lines := len(m.summaryLines(w))
+				h := m.actHeight(lines + modalChromeLines)
+				if maxOff := lines - (h - modalChromeLines); m.summaryScroll < maxOff {
+					m.summaryScroll++
+				}
+				return m, nil
+			case "k", keyUp:
+				if m.summaryScroll > 0 {
+					m.summaryScroll--
+				}
+				return m, nil
+			}
 			m.phase = phaseBrowsing
 			m.results = nil
+			m.summaryScroll = 0
 			return m, nil
 		case phaseBrowsing:
 		}
@@ -244,6 +278,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.confirmItems = m.buildPlan()
 			m.confirmCursor = 0
 			m.phase = phaseConfirming
+			m.sizeModal()
 		}
 	case key.Matches(msg, keys.Filter):
 		m.filtering = true
@@ -382,29 +417,43 @@ func (m *Model) expandFocused() {
 
 // View implements tea.Model.
 func (m Model) View() tea.View {
+	content := m.viewBrowse()
 	if m.showHelp {
-		return tea.NewView(m.viewHelp())
-	}
-	switch m.phase {
-	case phaseConfirming:
-		return tea.NewView(m.viewConfirm())
-	case phaseExploding:
-		if m.explosionDone {
-			return tea.NewView("deleting..." + "\n")
+		content = overlayModal(content, m.viewHelp(), m.width, m.height, 0, 0)
+	} else {
+		switch m.phase {
+		case phaseConfirming:
+			content = overlayModal(content, m.viewConfirm(), m.width, m.height, 0, 0)
+		case phaseExploding:
+			if m.explosionDone {
+				content = overlayModal(content, m.viewWaiting(), m.width, m.height, 0, 0)
+			} else {
+				dx, dy := m.explosionJitter()
+				content = overlayModal(content, m.viewExplosion(), m.width, m.height, dx, dy)
+			}
+		case phaseExecuting:
+			content = overlayModal(content, m.viewWaiting(), m.width, m.height, 0, 0)
+		case phaseSummary:
+			content = overlayModal(content, m.viewSummary(), m.width, m.height, 0, 0)
+		case phaseBrowsing:
 		}
-		return tea.NewView(m.viewExplosion())
-	case phaseExecuting:
-		return tea.NewView("deleting..." + "\n")
-	case phaseSummary:
-		return tea.NewView(m.viewSummary())
-	case phaseBrowsing:
 	}
+	// Full-window mode, lazygit-style: the tool owns the screen while it
+	// runs and restores the shell on exit.
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
 
+// viewBrowse renders the tree pane with its status line and footer; it is
+// also the backdrop every modal composites over.
+func (m Model) viewBrowse() string {
 	var b strings.Builder
 	now := m.now()
+	rule := styleDim.Render(strings.Repeat("─", max(m.width, 1)))
 
 	b.WriteString(m.statusLine())
-	b.WriteString("\n\n")
+	b.WriteString("\n" + rule + "\n")
 
 	if len(m.rows) == 0 {
 		if m.scanning {
@@ -412,7 +461,7 @@ func (m Model) View() tea.View {
 		} else {
 			b.WriteString(styleDim.Render("No worktrees match the current view"))
 		}
-		return tea.NewView(b.String())
+		return b.String()
 	}
 
 	// Render only the rows inside the scroll window: this both keeps the
@@ -438,98 +487,136 @@ func (m Model) View() tea.View {
 			lineIdx++
 		}
 	}
+	// Pad the pane so the footer stays pinned to the bottom of the screen.
+	for ; written < contentH; written++ {
+		b.WriteString("\n")
+	}
 
-	b.WriteString("\n")
+	b.WriteString(rule + "\n")
 	if m.filtering || m.filter != "" {
 		b.WriteString(m.filterInput.View() + "\n")
 	}
 	b.WriteString(m.footer())
-	return tea.NewView(b.String())
+	return b.String()
+}
+
+// rowStateFor derives the display states of row i, which may all hold at
+// once: focus, selection, and the visual-mode range.
+func (m Model) rowStateFor(i int, selected bool) rowState {
+	st := rowState{focused: i == m.focus, selected: selected}
+	if m.visualAnchor >= 0 {
+		lo, hi := m.visualAnchor, m.focus
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		st.inRange = i >= lo && i <= hi
+	}
+	return st
 }
 
 // renderRow renders one row into its terminal lines (1 for headers and
 // groups, 2 for leaves).
 func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
-	focused := i == m.focus
 	switch row.kind {
 	case rowRepo:
+		st := m.rowStateFor(i, false)
 		repo := &m.repos[row.repoIdx]
 		caret := "▾"
 		if m.collapsedRepos[row.key] {
 			caret = "▸"
 		}
 		mark := m.selectionMark(row)
-		line := fmt.Sprintf("%s %s %s  %s", caret, mark, styleRepoName.Render(repo.Name), styleDim.Render(repo.Path))
 		count := fmt.Sprintf("%d worktrees", m.visibleWorktreeCount(repo))
-		line = padBetween(line, styleDim.Render(count), m.width)
-		if focused {
-			line = styleFocused.Render(fmt.Sprintf("%s %s %s  %s", caret, mark, repo.Name, repo.Path))
+		width := m.width - 1 // gutter
+		fixed := 2 + lipgloss.Width(mark) + lipgloss.Width(repo.Name) + 2
+		pathAvail := width - fixed - lipgloss.Width(count) - 1
+		path := truncate(repo.Path, max(pathAvail, 1))
+		pad := max(width-fixed-lipgloss.Width(path)-lipgloss.Width(count), 1)
+
+		var b strings.Builder
+		b.WriteString(gutter(st))
+		b.WriteString(bgIf(styleDim, st.focused).Render(caret + " "))
+		if mark != "" {
+			b.WriteString(bgIf(styleSelected, st.focused).Render(mark))
 		}
-		return []string{line}
+		b.WriteString(bgIf(styleRepoName, st.focused).Render(repo.Name))
+		b.WriteString(bgIf(styleDim, st.focused).Render("  " + path))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st.focused).Render(strings.Repeat(" ", pad)))
+		b.WriteString(bgIf(styleDim, st.focused).Render(count))
+		return []string{b.String()}
 	case rowGroup:
+		st := m.rowStateFor(i, false)
 		caret := "▾"
 		if m.collapsedGroups[row.key] {
 			caret = "▸"
 		}
-		line := connectorPrefix(row.isLast) + caret + " " + m.selectionMark(row) + " " + row.node.Name + "/"
-		if focused {
-			line = styleFocused.Render(line)
+		mark := m.selectionMark(row)
+		var b strings.Builder
+		b.WriteString(gutter(st))
+		b.WriteString(bgIf(styleDim, st.focused).Render(connectorPrefix(row.isLast) + caret + " "))
+		if mark != "" {
+			b.WriteString(bgIf(styleSelected, st.focused).Render(mark))
 		}
-		return []string{line}
+		b.WriteString(bgIf(styleGroup, st.focused).Render(row.node.Name + "/"))
+		return []string{b.String()}
 	case rowLeaf:
-		prefix := ""
+		prefix, pathPrefix := "", "  "
 		if !row.flat {
 			prefix = connectorPrefix(row.isLast)
+			pathPrefix = pathConnectorPrefix(row.isLast) + "  "
 		}
-		selected := m.selection[row.node.Worktree.Path]
-		pathIndent := strings.Repeat(" ", len(prefix))
+		wt := row.node.Worktree
+		st := m.rowStateFor(i, m.selection[wt.Path])
+		st.muted = wt.Branch != "" && wt.Branch == m.repos[row.repoIdx].DefaultBranch
 		return []string{
-			renderLeafLine(prefix, *row.node.Worktree, row.node.Name, m.width, now, focused, selected),
-			renderPathLine(pathIndent+"  ", *row.node.Worktree, m.width),
+			renderLeafLine(prefix, *wt, row.node.Name, m.width, now, st, m.icons),
+			renderPathLine(pathPrefix, *wt, m.width, st),
 		}
 	default:
 		return nil
 	}
 }
 
-// selectionMark renders the tri-state indicator of a group or repo row.
+// selectionMark returns the tri-state indicator of a group or repo row.
+// Unselected rows show nothing: the caret already marks these rows, so a
+// placeholder dot would just duplicate it.
 func (m Model) selectionMark(row uiRow) string {
 	switch m.selectionState(row) {
 	case selAll:
-		return "✓"
+		return "✓ "
 	case selPartial:
-		return "◐"
-	case selNone:
-		return "·"
+		return "◐ "
 	default:
-		return "·"
+		return ""
 	}
 }
 
 // statusLine summarizes the scan: repo/worktree counts, scan state, and the
-// current selection.
+// current selection. Operational states (selection count, visual mode) get
+// the purple accent; the rest stays faint.
 func (m Model) statusLine() string {
 	total := 0
 	for i := range m.repos {
 		total += len(m.repos[i].Worktrees)
 	}
-	s := fmt.Sprintf("%d repos · %d worktrees", len(m.repos), total)
+	sep := styleDim.Render(" · ")
+	parts := []string{styleDim.Render(fmt.Sprintf("%d repos · %d worktrees", len(m.repos), total))}
 	if m.scanning {
-		s += " · scanning..."
+		parts = append(parts, styleDim.Render("scanning..."))
 	}
 	if n := len(m.selection); n > 0 {
-		s += fmt.Sprintf(" · %d selected", n)
+		parts = append(parts, styleAccentBold.Render(fmt.Sprintf("%d selected", n)))
 	}
 	if m.visualAnchor >= 0 {
-		s += " · VISUAL"
+		parts = append(parts, styleBadge.Render(" VISUAL "))
 	}
 	if m.mergedOnly {
-		s += " · merged only"
+		parts = append(parts, styleGood.Render("merged only"))
 	}
 	if m.sortMode.Flat() {
-		s += " · " + sortModeLabel(m.sortMode)
+		parts = append(parts, styleDim.Render(sortModeLabel(m.sortMode)))
 	}
-	return styleDim.Render(s)
+	return " " + strings.Join(parts, sep)
 }
 
 func sortModeLabel(mode domain.SortMode) string {
@@ -547,11 +634,42 @@ func sortModeLabel(mode domain.SortMode) string {
 	}
 }
 
-// footer renders the key hints.
+// hint renders one footer entry: the key bold, its description faint.
+func hint(k, desc string) string {
+	return styleKey.Render(k) + " " + styleDim.Render(desc)
+}
+
+// accentHint renders a footer entry emphasized in the accent color, used to
+// steer the user toward the next step of the delete flow.
+func accentHint(k, desc string) string {
+	return styleAccentBold.Render(k) + " " + styleAccent.Render(desc)
+}
+
+// footer renders the key hints. The set swaps with context (ADR 0013):
+// browsing, pending selection, and visual mode each show their own next
+// steps.
 func (m Model) footer() string {
-	hints := []string{
-		"j/k move", "space select", "v visual", "d delete",
-		"h/l collapse", "/ filter", "m merged only", "s sort", "q quit",
+	sep := styleDim.Render("  ·  ")
+	var hints []string
+	switch {
+	case m.visualAnchor >= 0:
+		hints = []string{
+			styleBadge.Render(" VISUAL "),
+			hint("j/k", "extend"), hint("v", "confirm"), hint("esc", "cancel"),
+		}
+	case len(m.selection) > 0:
+		hints = []string{
+			styleAccentBold.Render(fmt.Sprintf("%d selected", len(m.selection))),
+			accentHint("d", "delete"),
+			hint("space", "toggle"), hint("v", "visual"),
+			hint("j/k", "move"), hint("esc", "clear"),
+		}
+	default:
+		hints = []string{
+			hint("j/k", "move"), hint("space", "select"), hint("v", "visual"),
+			hint("h/l", "collapse"), hint("/", "filter"), hint("m", "merged only"),
+			hint("s", "sort"), hint("?", "help"), hint("q", "quit"),
+		}
 	}
-	return styleDim.Render(strings.Join(hints, "  ·  "))
+	return " " + strings.Join(hints, sep)
 }

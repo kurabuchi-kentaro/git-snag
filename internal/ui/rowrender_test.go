@@ -56,7 +56,7 @@ func TestRenderLeafLine_longBranchTruncatesAndKeepsRightEdge(t *testing.T) {
 		LastCommitTime: time.Unix(1_999_000_000, 0),
 	}
 	const width = 60
-	line := renderLeafLine("", w, strings.Repeat("very-long-segment-", 10), width, time.Unix(2_000_000_000, 0), false, false)
+	line := renderLeafLine("", w, strings.Repeat("very-long-segment-", 10), width, time.Unix(2_000_000_000, 0), rowState{}, iconsUnicode)
 
 	if got := lipgloss.Width(line); got != width {
 		t.Errorf("line width = %d, want %d", got, width)
@@ -69,7 +69,7 @@ func TestRenderLeafLine_longBranchTruncatesAndKeepsRightEdge(t *testing.T) {
 	}
 }
 
-func TestRenderLeafLine_emojiTagsDoNotBreakAlignment(t *testing.T) {
+func TestRenderLeafLine_tagsDoNotBreakAlignment(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(2_000_000_000, 0)
 	plain := domain.Worktree{Branch: "x", LastCommitTime: now.Add(-time.Hour)}
@@ -79,17 +79,76 @@ func TestRenderLeafLine_emojiTagsDoNotBreakAlignment(t *testing.T) {
 		LastCommitTime: now.Add(-time.Hour),
 	}
 	const width = 60
-	a := renderLeafLine("", plain, "x", width, now, false, false)
-	b := renderLeafLine("", tagged, "x", width, now, false, false)
-	if lipgloss.Width(a) != width || lipgloss.Width(b) != width {
-		t.Errorf("widths = %d and %d, want both %d", lipgloss.Width(a), lipgloss.Width(b), width)
+	for _, ic := range []iconSet{iconsNerd, iconsUnicode} {
+		a := renderLeafLine("", plain, "x", width, now, rowState{}, ic)
+		b := renderLeafLine("", tagged, "x", width, now, rowState{}, ic)
+		if lipgloss.Width(a) != width || lipgloss.Width(b) != width {
+			t.Errorf("widths = %d and %d, want both %d", lipgloss.Width(a), lipgloss.Width(b), width)
+		}
+	}
+}
+
+func TestRenderLeafLine_focusedAndSelectedKeepWidth(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(2_000_000_000, 0)
+	w := domain.Worktree{Branch: "x", Merged: true, LastCommitTime: now.Add(-time.Hour)}
+	const width = 60
+	for _, st := range []rowState{
+		{focused: true},
+		{selected: true},
+		{inRange: true},
+		{focused: true, selected: true, inRange: true},
+	} {
+		line := renderLeafLine("", w, "x", width, now, st, iconsUnicode)
+		if got := lipgloss.Width(line); got != width {
+			t.Errorf("state %+v: width = %d, want %d", st, got, width)
+		}
+	}
+}
+
+func TestRenderLeafLine_selectedShowsCheckMark(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(2_000_000_000, 0)
+	w := domain.Worktree{Branch: "x", LastCommitTime: now.Add(-time.Hour)}
+	line := renderLeafLine("", w, "x", 60, now, rowState{selected: true}, iconsUnicode)
+	if !strings.Contains(line, "✓") {
+		t.Errorf("selected leaf should carry ✓: %q", line)
+	}
+}
+
+func TestRenderLeafLine_unselectedCarriesNoPlaceholderMark(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(2_000_000_000, 0)
+	for _, w := range []domain.Worktree{
+		{Branch: "x", LastCommitTime: now.Add(-time.Hour)},
+		{Branch: "main", IsMain: true, LastCommitTime: now.Add(-time.Hour)},
+	} {
+		line := renderLeafLine("", w, w.Branch, 60, now, rowState{}, iconsUnicode)
+		plain := stripANSI(line)
+		if strings.Contains(plain, "·") || strings.Contains(plain, "–") {
+			t.Errorf("unselected leaf should carry no mark: %q", plain)
+		}
+	}
+}
+
+func TestRenderLeafLine_mutedNameRendersFaint(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(2_000_000_000, 0)
+	w := domain.Worktree{Branch: "dev", LastCommitTime: now.Add(-time.Hour)}
+	muted := renderLeafLine("", w, "dev", 60, now, rowState{muted: true}, iconsUnicode)
+	normal := renderLeafLine("", w, "dev", 60, now, rowState{}, iconsUnicode)
+	if muted == normal {
+		t.Error("the default branch should render dimmer than other branches")
+	}
+	if !strings.Contains(muted, "\x1b[2m") {
+		t.Errorf("muted name should carry the faint attribute: %q", muted)
 	}
 }
 
 func TestRenderPathLine_prunableShowsMissingAnnotation(t *testing.T) {
 	t.Parallel()
 	w := domain.Worktree{Branch: "x", Path: "/gone/x", Prunable: true}
-	line := renderPathLine("", w, 60)
+	line := renderPathLine("", w, 60, rowState{})
 	if !strings.Contains(line, "(missing)") {
 		t.Errorf("prunable path line should carry (missing): %q", line)
 	}
@@ -98,20 +157,62 @@ func TestRenderPathLine_prunableShowsMissingAnnotation(t *testing.T) {
 	}
 }
 
-func TestTagsFor_protectedAndStatusIcons(t *testing.T) {
+func TestTagParts_protectedAndStatusGlyphs(t *testing.T) {
 	t.Parallel()
 	w := domain.Worktree{
 		IsMain: true, Dirty: true, Locked: true, Merged: true,
-		UnpushedCount: 1, HasUpstream: true, Prunable: true,
+		UnpushedCount: 3, HasUpstream: true, Prunable: true,
 	}
-	tags := tagsFor(w)
-	for _, icon := range []string{iconMain, iconDirty, iconLocked, iconMerged, iconUnpushed, iconPrunable} {
-		if !strings.Contains(tags, icon) {
-			t.Errorf("tags %q missing icon %q", tags, icon)
+	for _, ic := range []iconSet{iconsNerd, iconsUnicode} {
+		var joined strings.Builder
+		for _, p := range tagParts(w, ic) {
+			joined.WriteString(p.text + " ")
+		}
+		tags := joined.String()
+		for _, glyph := range []string{ic.main, ic.dirty, ic.locked, ic.merged, ic.prunable} {
+			if !strings.Contains(tags, glyph) {
+				t.Errorf("tags %q missing glyph %q", tags, glyph)
+			}
+		}
+		if !strings.Contains(tags, ic.unpushed+"3") {
+			t.Errorf("tags %q should carry the unpushed count %q", tags, ic.unpushed+"3")
 		}
 	}
-	if strings.Contains(tagsFor(domain.Worktree{}), iconDirty) {
-		t.Error("clean worktree should carry no dirty icon")
+	if len(tagParts(domain.Worktree{}, iconsUnicode)) != 0 {
+		t.Error("clean worktree should carry no tags")
+	}
+}
+
+func TestIconSetByName_validatesNames(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"", "nerd", "unicode"} {
+		if _, ok := iconSetByName(name); !ok {
+			t.Errorf("iconSetByName(%q) should be valid", name)
+		}
+	}
+	if _, ok := iconSetByName("emoji"); ok {
+		t.Error("iconSetByName(emoji) should be rejected")
+	}
+}
+
+func TestPathConnectorPrefix_continuesGuidesThroughPathLines(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		isLast []bool
+		want   string
+	}{
+		// A leaf with later siblings keeps the bar running through its
+		// path line; the last child leaves a gap (ADR 0013).
+		{[]bool{false}, "│   "},
+		{[]bool{true}, "    "},
+		{[]bool{false, false}, "│   │   "},
+		{[]bool{false, true}, "│       "},
+		{[]bool{true, false}, "    │   "},
+	}
+	for _, tc := range cases {
+		if got := pathConnectorPrefix(tc.isLast); got != tc.want {
+			t.Errorf("pathConnectorPrefix(%v) = %q, want %q", tc.isLast, got, tc.want)
+		}
 	}
 }
 

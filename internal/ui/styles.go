@@ -5,20 +5,88 @@ package ui
 
 import "charm.land/lipgloss/v2"
 
-// Status icons shown on worktree rows.
-const (
-	iconDirty    = "📝"
-	iconLocked   = "🔒"
-	iconMerged   = "✅"
-	iconUnpushed = "⬆️"
-	iconPrunable = "👻"
-	iconCurrent  = "📍"
-	iconMain     = "🏠"
+// The palette follows ADR 0013: state colors come from the terminal's ANSI
+// palette so they track the user's theme; the one fixed color is the purple
+// accent, which marks operations (selection, visual range, filter, modal
+// frames) and degrades to ANSI magenta on non-truecolor terminals.
+var (
+	colorAccent = lipgloss.Color("#9d7cd8") // operations: selection, visual, modals
+	colorGood   = lipgloss.Color("2")       // merged, success
+	colorWarn   = lipgloss.Color("3")       // dirty, warnings
+	colorInfo   = lipgloss.Color("4")       // locked; directory groups
+	colorBad    = lipgloss.Color("1")       // prunable, failures, danger titles
+	colorSync   = lipgloss.Color("6")       // unpushed (remote out of sync)
+	colorFocus  = lipgloss.Color("8")       // focused-row background (theme gray)
 )
 
 var (
-	styleRepoName  = lipgloss.NewStyle().Bold(true)
-	styleDim       = lipgloss.NewStyle().Faint(true)
-	styleFocused   = lipgloss.NewStyle().Reverse(true)
-	styleProtected = lipgloss.NewStyle().Faint(true)
+	styleRepoName   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleBranch     = lipgloss.NewStyle().Foreground(colorGood)
+	styleGroup      = lipgloss.NewStyle().Foreground(colorInfo).Bold(true)
+	styleDim        = lipgloss.NewStyle().Faint(true)
+	styleProtected  = lipgloss.NewStyle().Faint(true)
+	styleSelected   = lipgloss.NewStyle().Foreground(colorAccent)
+	styleAccent     = lipgloss.NewStyle().Foreground(colorAccent)
+	styleAccentBold = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleKey        = lipgloss.NewStyle().Bold(true)
+	styleBadge      = lipgloss.NewStyle().Foreground(lipgloss.Color("#f5f2fa")).Background(colorAccent).Bold(true)
+	styleGood       = lipgloss.NewStyle().Foreground(colorGood)
+	styleWarn       = lipgloss.NewStyle().Foreground(colorWarn)
+	styleInfo       = lipgloss.NewStyle().Foreground(colorInfo)
+	styleBad        = lipgloss.NewStyle().Foreground(colorBad)
+	styleSync       = lipgloss.NewStyle().Foreground(colorSync)
+	styleDanger     = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
+	styleModal      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
 )
+
+// gutterBar marks rows inside the visual-mode range in the one-cell gutter
+// every row reserves at the left edge.
+const gutterBar = "▌"
+
+// iconSet is one table of status glyphs. Both sets are single-width,
+// colorable glyphs (ADR 0013); emoji are gone.
+type iconSet struct {
+	dirty    string
+	locked   string
+	merged   string
+	unpushed string // prefix of the count: "↑3"
+	prunable string
+	current  string
+	main     string
+}
+
+// iconsNerd is the default set and assumes a Nerd Font patched terminal
+// font. iconsUnicode is the fallback selected via config or --icons.
+var (
+	iconsNerd = iconSet{
+		dirty:    "", // nf-fa-pencil
+		locked:   "", // nf-fa-lock
+		merged:   "", // nf-oct-git_merge
+		unpushed: "↑",
+		prunable: "\U000f02a0", // nf-md-ghost
+		current:  "",          // nf-fa-map_marker
+		main:     "",          // nf-fa-home
+	}
+	iconsUnicode = iconSet{
+		dirty:    "±",
+		locked:   "⊘",
+		merged:   "✓",
+		unpushed: "↑",
+		prunable: "†",
+		current:  "●",
+		main:     "⌂",
+	}
+)
+
+// iconSetByName maps the config/flag value to a glyph table; unknown names
+// report ok=false so the CLI can fail loudly (REQ-A6).
+func iconSetByName(name string) (iconSet, bool) {
+	switch name {
+	case "", "nerd":
+		return iconsNerd, true
+	case "unicode":
+		return iconsUnicode, true
+	default:
+		return iconSet{}, false
+	}
+}

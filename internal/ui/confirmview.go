@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/kurabuchi-kentaro/git-snag/internal/action"
 )
@@ -75,19 +76,57 @@ func (m Model) updateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// viewConfirm renders the batch confirmation screen.
-func (m Model) viewConfirm() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Delete %d worktree(s)?\n", len(m.confirmItems))
-	b.WriteString(styleDim.Render("space: toggle branch deletion for the highlighted item") + "\n\n")
+// sizeModal fixes the modal interior for the delete flow's three acts
+// (confirm → explosion → summary) so the frame never jumps between them.
+func (m *Model) sizeModal() {
+	m.modalW = modalInteriorWidth(m.width)
+	lines, _ := m.confirmLines(m.modalW)
+	m.modalH = modalInteriorHeight(m.height, len(lines)+modalChromeLines)
+	m.summaryScroll = 0
+}
+
+// actWidth returns the delete modal's fixed interior width, deriving a
+// fresh one when an act renders without going through the delete key.
+func (m Model) actWidth() int {
+	if m.modalW > 0 {
+		return m.modalW
+	}
+	return modalInteriorWidth(m.width)
+}
+
+// actHeight returns the fixed interior height, sized to the given content
+// when no confirm act pinned the frame beforehand.
+func (m Model) actHeight(contentLines int) int {
+	if m.modalH > 0 {
+		return m.modalH
+	}
+	return modalInteriorHeight(m.height, contentLines)
+}
+
+// modalChromeLines is the confirm modal's fixed header (title, hint, blank)
+// plus footer (blank, hints).
+const modalChromeLines = 5
+
+// padLine pads a (possibly styled) line with spaces to the given width.
+func padLine(s string, width int) string {
+	if pad := width - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
+// confirmLines renders every plan item into its display lines and records
+// where each item starts, for cursor-following scroll.
+func (m Model) confirmLines(width int) (lines []string, itemStarts []int) {
 	for i, it := range m.confirmItems {
-		cursor := "  "
+		itemStarts = append(itemStarts, len(lines))
+		cursor, cursorStyle := "  ", styleDim
 		if i == m.confirmCursor {
-			cursor = "> "
+			cursor, cursorStyle = "▸ ", styleAccentBold
 		}
 		branchMark := "[x] delete branch"
 		if it.Worktree.Detached() {
-			branchMark = "    (detached: no branch)"
+			branchMark = "(detached: no branch)"
 		} else if !it.DeleteBranch {
 			branchMark = "[ ] keep branch"
 		}
@@ -95,14 +134,65 @@ func (m Model) viewConfirm() string {
 		if it.Worktree.Detached() {
 			label = leafLabel(it)
 		}
-		fmt.Fprintf(&b, "%s%s  %s\n", cursor, label, branchMark)
-		fmt.Fprintf(&b, "    %s\n", styleDim.Render(it.Worktree.Path))
+		nameStyle := lipgloss.NewStyle()
+		if i == m.confirmCursor {
+			nameStyle = nameStyle.Bold(true)
+		}
+		avail := width - 2 - lipgloss.Width(branchMark) - 2
+		lines = append(lines,
+			cursorStyle.Render(cursor)+nameStyle.Render(padLine(truncate(label, max(avail, 1)), max(avail, 1)))+"  "+styleDim.Render(branchMark))
+		lines = append(lines, styleDim.Render(truncate("    "+it.Worktree.Path, width)))
 		for _, warn := range warningsFor(it) {
-			fmt.Fprintf(&b, "    %s\n", warn)
+			lines = append(lines, styleWarn.Render(truncate("    "+warn, width)))
 		}
 	}
-	b.WriteString("\n" + styleDim.Render("y confirm  ·  n/esc cancel"))
-	return b.String()
+	return lines, itemStarts
+}
+
+// viewConfirm renders the batch confirmation act of the delete modal:
+// danger title, scrolling item list, and key hints.
+func (m Model) viewConfirm() string {
+	w := m.actWidth()
+	lines, starts := m.confirmLines(w)
+	h := m.actHeight(len(lines) + modalChromeLines)
+	bodyH := max(h-modalChromeLines, 1)
+
+	// Derive the scroll offset from the cursor so its item is fully visible.
+	offset := 0
+	if len(starts) > 0 {
+		itemStart := starts[min(m.confirmCursor, len(starts)-1)]
+		itemEnd := len(lines)
+		if m.confirmCursor+1 < len(starts) {
+			itemEnd = starts[m.confirmCursor+1]
+		}
+		if itemEnd > bodyH {
+			offset = itemEnd - bodyH
+		}
+		offset = min(offset, itemStart)
+	}
+
+	title := styleDanger.Render(fmt.Sprintf("Delete %d worktree(s)?", len(m.confirmItems)))
+	pos := ""
+	if len(lines) > bodyH {
+		pos = styleDim.Render(fmt.Sprintf("%d/%d", m.confirmCursor+1, len(m.confirmItems)))
+	}
+	sub := styleDim.Render("space: toggle branch deletion · j/k move")
+	sep := styleDim.Render("  ·  ")
+	hints := hint("y", "confirm") + sep + hint("n/esc", "cancel")
+
+	out := []string{padLine(title, w-lipgloss.Width(pos)) + pos, sub, ""}
+	out = append(out, windowLines(lines, offset, bodyH)...)
+	out = append(out, "", hints)
+	for i := range out {
+		out[i] = padLine(out[i], w)
+	}
+	return strings.Join(out, "\n")
+}
+
+// viewWaiting fills the act frame while deletion results are pending.
+func (m Model) viewWaiting() string {
+	w, h := m.actWidth(), m.actHeight(modalChromeLines+1)
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, styleDim.Render("deleting..."))
 }
 
 // leafLabel names a detached-HEAD item in the confirmation list.

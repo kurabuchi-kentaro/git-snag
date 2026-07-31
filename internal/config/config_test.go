@@ -83,6 +83,33 @@ func TestDefaultPath_respectsXDGConfigHome(t *testing.T) {
 	}
 }
 
+func TestResolveIcons_flagBeatsConfig(t *testing.T) {
+	t.Parallel()
+	var cfg Config
+	cfg.UI.Icons = "unicode"
+	if got := ResolveIcons(cfg, ""); got != "unicode" {
+		t.Errorf("ResolveIcons(config only) = %q, want unicode", got)
+	}
+	if got := ResolveIcons(cfg, "nerd"); got != "nerd" {
+		t.Errorf("ResolveIcons(flag set) = %q, want nerd (flag wins)", got)
+	}
+	if got := ResolveIcons(Config{}, ""); got != "" {
+		t.Errorf("ResolveIcons(nothing set) = %q, want empty (UI default applies)", got)
+	}
+}
+
+func TestLoad_uiIconsParsed(t *testing.T) {
+	t.Parallel()
+	path := writeConfig(t, "ui:\n  icons: unicode\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Icons != "unicode" {
+		t.Errorf("UI.Icons = %q, want unicode", cfg.UI.Icons)
+	}
+}
+
 func TestLoad_brokenYamlFailsClearly(t *testing.T) {
 	t.Parallel()
 	path := writeConfig(t, "scan: [unclosed\n")
