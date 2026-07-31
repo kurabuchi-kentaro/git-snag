@@ -69,7 +69,13 @@ func TestBuild_slashPrefixesGroupUnderSharedNode(t *testing.T) {
 
 func TestBuild_doubleNestedBranchCreatesTwoGroupLevels(t *testing.T) {
 	t.Parallel()
-	root := Build([]domain.Worktree{wt("feature/fix/login-redirect")})
+	// Two leaves per level keep both groups populated (a single child
+	// would be compacted into its parent's label).
+	root := Build([]domain.Worktree{
+		wt("feature/fix/login-redirect"),
+		wt("feature/fix/logout"),
+		wt("feature/other"),
+	})
 
 	feature := findChild(t, root, "feature")
 	fix := findChild(t, feature, "fix")
@@ -136,8 +142,9 @@ func TestBuild_treeModeSortsAlphabeticallyPerLevel(t *testing.T) {
 func TestBuild_groupContainingProtectedLeafSortsFirst(t *testing.T) {
 	t.Parallel()
 	root := Build([]domain.Worktree{
-		wt("aaa/one"),
+		wt("aaa/one"), wt("aaa/two"),
 		wt("zzz/protected-inside", withMain()),
+		wt("zzz/plain"),
 		wt("bbb"),
 	})
 
@@ -262,7 +269,8 @@ func TestFilter_branchSubstringKeepsLeafAndDropsEmptyGroups(t *testing.T) {
 		t.Fatalf("Filter = %+v, want only feature/rate-limit", got)
 	}
 	root := Build(got)
-	if len(root.Children) != 1 || root.Children[0].Name != "feature" {
+	// The lone survivor compacts into a single root-level leaf.
+	if len(root.Children) != 1 || root.Children[0].Name != "feature/rate-limit" {
 		t.Errorf("groups without matching leaves should vanish: %v", childNames(root))
 	}
 }

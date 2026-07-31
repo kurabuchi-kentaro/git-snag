@@ -59,22 +59,27 @@ func TestBranchMode_toggleShowsBareBranchesAndBadge(t *testing.T) {
 	}
 }
 
-func TestBranchMode_defaultBranchAnchorsTheTree(t *testing.T) {
+func TestBranchMode_defaultBranchPinsFirstAsSibling(t *testing.T) {
 	t.Parallel()
 	m := apply(t, modelWith(t, testRepo("alpha", "feature/x")), press('b'))
-	// rows: repo header, main anchor, feature/ group, x leaf
-	if len(m.rows) != 4 {
-		t.Fatalf("rows = %d, want 4", len(m.rows))
+	// rows: repo header, muted main first, then the compacted feature/x
+	// leaf as its sibling — no ancestry-implying nesting (ADR 0014).
+	if len(m.rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(m.rows))
 	}
-	anchor := m.rows[1]
-	if anchor.kind != rowLeaf || anchor.node.Branch == nil || anchor.node.Branch.Name != "main" {
-		t.Fatalf("row 1 = %+v, want the main anchor", anchor.node)
+	first := m.rows[1]
+	if first.kind != rowLeaf || first.node.Branch == nil || first.node.Branch.Name != "main" {
+		t.Fatalf("row 1 = %+v, want the protected main pinned first", first.node)
 	}
-	if len(anchor.node.Children) == 0 {
-		t.Error("the anchor should carry the subtree")
+	if len(first.node.Children) != 0 {
+		t.Error("main must be a plain leaf, not a subtree root")
 	}
-	if m.rows[2].kind != rowGroup {
-		t.Errorf("row 2 should be the feature/ group, got %+v", m.rows[2].node)
+	leaf := m.rows[2]
+	if leaf.kind != rowLeaf || leaf.node.Name != "feature/x" {
+		t.Errorf("row 2 = %+v, want the compacted feature/x leaf", leaf.node)
+	}
+	if leaf.isLast[0] != true || len(leaf.isLast) != 1 {
+		t.Errorf("feature/x should sit at depth 0 as main's sibling: %+v", leaf.isLast)
 	}
 }
 

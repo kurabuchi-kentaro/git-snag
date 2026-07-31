@@ -21,9 +21,8 @@ type Row struct {
 func (r Row) Depth() int { return len(r.IsLast) - 1 }
 
 // Flatten walks the tree in display order and returns the visible rows.
-// Children of collapsed nodes are omitted (the row itself stays visible).
-// Any node with children descends — groups, and the branch-mode root
-// anchor, which is a leaf that carries the subtree (ADR 0014).
+// Children of groups whose ID is in collapsed are omitted (the group row
+// itself stays visible).
 func Flatten(root *Node, collapsed map[string]bool) []Row {
 	var rows []Row
 	var walk func(n *Node, ancestry []bool)
@@ -32,7 +31,7 @@ func Flatten(root *Node, collapsed map[string]bool) []Row {
 			isLast := i == len(n.Children)-1
 			path := append(append([]bool{}, ancestry...), isLast)
 			rows = append(rows, Row{Node: c, IsLast: path})
-			if len(c.Children) > 0 && !collapsed[c.ID] {
+			if c.IsGroup() && !collapsed[c.ID] {
 				walk(c, path)
 			}
 		}

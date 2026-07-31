@@ -425,13 +425,6 @@ func (m *Model) collapseFocused() {
 	case rowGroup:
 		m.collapsedGroups[row.key] = true
 	case rowLeaf:
-		if row.node != nil && len(row.node.Children) > 0 {
-			// The branch-mode root anchor folds its own subtree, like a
-			// group (ADR 0014).
-			m.collapsedGroups[groupKey(m.repos[row.repoIdx].Path, row.node.ID)] = true
-			m.rebuildRows()
-			return
-		}
 		target := row.parentKey
 		if target == "" {
 			// Global flat rows have no enclosing header to collapse.
@@ -467,10 +460,6 @@ func (m *Model) expandFocused() {
 	case rowGroup:
 		delete(m.collapsedGroups, row.key)
 	case rowLeaf:
-		if row.node != nil && len(row.node.Children) > 0 {
-			delete(m.collapsedGroups, groupKey(m.repos[row.repoIdx].Path, row.node.ID))
-			break
-		}
 		return
 	}
 	m.rebuildRows()
@@ -656,22 +645,14 @@ func (m Model) renderRow(i int, row uiRow, now time.Time) []string {
 	}
 }
 
-// renderBranchLeaf renders a branch-mode leaf: the branch name (plus a
-// caret when it is the root anchor carrying the subtree), its worktree's
-// path line at full info level, and the branch/worktree tag cluster.
+// renderBranchLeaf renders a branch-mode leaf: the branch name, its
+// worktree's path line at full info level, and the branch/worktree tag
+// cluster.
 func (m Model) renderBranchLeaf(i int, row uiRow, prefix, pathPrefix string, now time.Time) []string {
 	br := row.node.Branch
-	repo := &m.repos[row.repoIdx]
 	st := m.rowStateFor(i, m.selection[row.key])
 	st.muted = br.Protected
 
-	if len(row.node.Children) > 0 || m.collapsedGroups[groupKey(repo.Path, row.node.ID)] {
-		caret := "▾ "
-		if m.collapsedGroups[groupKey(repo.Path, row.node.ID)] {
-			caret = "▸ "
-		}
-		prefix += caret
-	}
 	w := m.wtByPath[br.WorktreePath]
 	lines := []string{renderBranchLine(prefix, *br, w, row.node.Name, m.width, now, st, m.icons)}
 	if m.infoLevel >= 2 && w != nil {

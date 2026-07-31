@@ -25,28 +25,23 @@ func brTime(t time.Time) func(*domain.Branch) {
 func brMerged() func(*domain.Branch) { return func(b *domain.Branch) { b.Merged = true } }
 func brGone() func(*domain.Branch)   { return func(b *domain.Branch) { b.UpstreamGone = true } }
 
-func TestBuildBranches_defaultBranchAnchorsTheTree(t *testing.T) {
-	t.Parallel()
-	root, anchorID := BuildBranches([]domain.Branch{
-		br("main"), br("feature/x"), br("feature/y"), br("solo"),
-	}, "main")
-	if anchorID != "main" {
-		t.Errorf("anchorID = %q, want main", anchorID)
-	}
+func brProtected() func(*domain.Branch) { return func(b *domain.Branch) { b.Protected = true } }
 
-	if len(root.Children) != 1 {
-		t.Fatalf("root children = %v, want the anchor only", childNames(root))
+func TestBuildBranches_slashHierarchyWithProtectedPinnedFirst(t *testing.T) {
+	t.Parallel()
+	root := BuildBranches([]domain.Branch{
+		br("feature/x"), br("feature/y"), br("solo"), br("main", brProtected()),
+	})
+
+	got := childNames(root)
+	want := []string{"main", "feature", "solo"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("root children = %v, want %v (protected first, then alphabetical)", got, want)
 	}
-	anchor := root.Children[0]
-	if anchor.Name != "main" || anchor.Branch == nil || anchor.IsGroup() {
-		t.Fatalf("anchor = %+v, want the main branch leaf", anchor)
+	if main := root.Children[0]; main.Branch == nil || len(main.Children) != 0 {
+		t.Errorf("main should be a plain leaf sibling, got %+v", main)
 	}
-	got := childNames(anchor)
-	want := []string{"feature", "solo"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("anchor children = %v, want %v", got, want)
-	}
-	feature := findChild(t, anchor, "feature")
+	feature := findChild(t, root, "feature")
 	if feature.ID != "feature" {
 		t.Errorf("group ID = %q, want un-prefixed %q", feature.ID, "feature")
 	}
@@ -55,35 +50,40 @@ func TestBuildBranches_defaultBranchAnchorsTheTree(t *testing.T) {
 	}
 }
 
-func TestBuildBranches_withoutDefaultBranchHangsOffRoot(t *testing.T) {
+func TestBuildBranches_compactsSingleChildNamespaces(t *testing.T) {
 	t.Parallel()
-	root, anchorID := BuildBranches([]domain.Branch{br("a"), br("b")}, "")
-	if anchorID != "" {
-		t.Errorf("anchorID = %q, want empty without a default branch", anchorID)
-	}
+	root := BuildBranches([]domain.Branch{
+		br("main", brProtected()),
+		br("feature/only-one"),
+		br("chore/deep/nested"),
+		br("fix/a"), br("fix/b"),
+	})
+
 	got := childNames(root)
-	if len(got) != 2 {
-		t.Fatalf("root children = %v, want the branches directly", got)
+	want := []string{"main", "chore/deep/nested", "feature/only-one", "fix"}
+	if len(got) != len(want) {
+		t.Fatalf("root children = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("root children = %v, want %v (single-child namespaces folded)", got, want)
+		}
+	}
+	if leaf := findChild(t, root, "feature/only-one"); leaf.IsGroup() || leaf.ID != "feature/only-one" {
+		t.Errorf("folded leaf = %+v, want the branch leaf keeping its ID", leaf)
+	}
+	if fix := findChild(t, root, "fix"); !fix.IsGroup() || len(fix.Children) != 2 {
+		t.Errorf("fix/ has two children and must stay a group: %+v", fix)
 	}
 }
 
-func TestBuildBranches_flattenDescendsThroughAnchor(t *testing.T) {
+func TestBuild_compactsSingleChildNamespaces(t *testing.T) {
 	t.Parallel()
-	root, _ := BuildBranches([]domain.Branch{br("main"), br("feature/x")}, "main")
-	rows := Flatten(root, nil)
-	if len(rows) != 3 { // main, feature/, x
-		t.Fatalf("rows = %d, want 3", len(rows))
-	}
-	if rows[0].Node.Name != "main" || rows[0].Depth() != 0 {
-		t.Errorf("row 0 = %+v, want the anchor at depth 0", rows[0].Node.Name)
-	}
-	if rows[2].Node.Name != "x" || rows[2].Depth() != 2 {
-		t.Errorf("row 2 = %s depth %d, want leaf x at depth 2", rows[2].Node.Name, rows[2].Depth())
-	}
-	// Collapsing the anchor hides the whole subtree.
-	collapsed := Flatten(root, map[string]bool{"main": true})
-	if len(collapsed) != 1 {
-		t.Errorf("collapsed rows = %d, want the anchor only", len(collapsed))
+	root := Build([]domain.Worktree{wt("feature/only"), wt("fix/a"), wt("fix/b")})
+	got := childNames(root)
+	want := []string{"feature/only", "fix"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("root children = %v, want %v", got, want)
 	}
 }
 

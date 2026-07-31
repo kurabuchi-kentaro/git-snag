@@ -2,6 +2,16 @@
 
 Date: 2026-08-01
 
+Amended 2026-08-01: the default-branch root anchor described below was
+dropped after review. Nesting every branch under the default branch reads
+as an ancestry claim that branch names cannot make, and it left the
+selection-propagation rule of the anchor row unreadable (does space on
+main select everything beneath it?). The default branch now renders as a
+muted sibling pinned first — the same shape as the worktree view. The same
+review added single-child namespace compaction (VS Code's compact-folders
+convention) to both trees: a namespace that disambiguates nothing folds
+into its child's label, e.g. `feature/uc1-backend` as one row.
+
 ## Context
 
 git-snag only shows branches that have a worktree. In real repositories

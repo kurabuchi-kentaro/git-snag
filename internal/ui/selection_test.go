@@ -28,8 +28,14 @@ func focusOn(t *testing.T, m *Model, match func(uiRow) bool) {
 	t.Fatal("no row matched")
 }
 
+// leafNamed matches a leaf by its display name; compaction may fold a
+// single-child group prefix into it, so a suffix match keeps callers
+// working with the bare last segment.
 func leafNamed(name string) func(uiRow) bool {
-	return func(r uiRow) bool { return r.kind == rowLeaf && r.node.Name == name }
+	return func(r uiRow) bool {
+		return r.kind == rowLeaf &&
+			(r.node.Name == name || strings.HasSuffix(r.node.Name, "/"+name))
+	}
 }
 
 func groupNamed(name string) func(uiRow) bool {
@@ -148,13 +154,15 @@ func TestSelectionState_triState(t *testing.T) {
 
 func TestSpace_onGroupUnderFilterSelectsOnlyVisibleLeaves(t *testing.T) {
 	t.Parallel()
-	m := modelWith(t, testRepo("alpha", "feature/apple", "feature/banana"))
-	m = apply(t, m, press('/'), press('a'), press('p'), press('p'), esc())
+	// Two matches keep the feature/ group alive (a single survivor would
+	// compact into a plain leaf); banana stays filtered out.
+	m := modelWith(t, testRepo("alpha", "feature/apple", "feature/apricot", "feature/banana"))
+	m = apply(t, m, press('/'), press('a'), press('p'), esc())
 	focusOn(t, &m, groupNamed("feature"))
 	m = apply(t, m, space())
 	got := selectedBranches(m)
-	if !got["feature/apple"] || got["feature/banana"] {
-		t.Errorf("selection = %v, want only the visible feature/apple", got)
+	if !got["feature/apple"] || !got["feature/apricot"] || got["feature/banana"] {
+		t.Errorf("selection = %v, want only the visible feature/ap* leaves", got)
 	}
 }
 

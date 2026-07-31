@@ -44,8 +44,7 @@ func (m *Model) subtreeFor(row uiRow) *tree.Node {
 	}
 	repo := &m.repos[row.repoIdx]
 	if m.branchMode {
-		root, _ := tree.BuildBranches(m.visibleBranches(repo), repo.DefaultBranch)
-		return root
+		return tree.BuildBranches(m.visibleBranches(repo))
 	}
 	return tree.Build(m.visibleWorktrees(repo))
 }

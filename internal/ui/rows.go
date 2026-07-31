@@ -124,6 +124,7 @@ func (m *Model) appendTreeRows() {
 			continue
 		}
 
+		parents := []string{repo.Path}
 		for _, r := range tree.Flatten(root, m.bareCollapsedGroups(repo.Path)) {
 			row := uiRow{
 				repoIdx: idx,
@@ -137,10 +138,21 @@ func (m *Model) appendTreeRows() {
 				row.kind = rowLeaf
 				row.key = r.Node.ID
 			}
-			row.parentKey = m.parentKeyFor(repo.Path, r.Node)
+			row.parentKey, parents = parentFromDepth(parents, r.Depth(), row.key)
 			m.rows = append(m.rows, row)
 		}
 	}
+}
+
+// parentFromDepth resolves a row's collapse parent from the flattened walk
+// itself — the nearest enclosing row, or the repo header at depth 0 — and
+// records the row as the candidate parent for the next depth. Deriving the
+// parent from names would point at groups that single-child compaction
+// folded away.
+func parentFromDepth(parents []string, depth int, key string) (string, []string) {
+	parent := parents[min(depth, len(parents)-1)]
+	parents = append(parents[:min(depth+1, len(parents))], key)
+	return parent, parents
 }
 
 // appendGlobalFlatRows renders the flat sort modes as one repo-spanning
@@ -173,8 +185,8 @@ func (m *Model) appendGlobalFlatRows() {
 }
 
 // appendBranchTreeRows renders branch mode's TreeView (ADR 0014): a header
-// per repository, the default branch as the root anchor, and every other
-// branch nested beneath it by slash-delimited name.
+// per repository with the local branches nested beneath it by
+// slash-delimited name, the muted default branch pinned first.
 func (m *Model) appendBranchTreeRows() {
 	for idx := range m.repos {
 		repo := &m.repos[idx]
@@ -182,7 +194,7 @@ func (m *Model) appendBranchTreeRows() {
 		if !ok {
 			continue
 		}
-		root, anchorID := tree.BuildBranches(visible, repo.DefaultBranch)
+		root := tree.BuildBranches(visible)
 		// The header row carries the repo's whole tree so selection
 		// gestures and the tri-state mark reuse it instead of rebuilding.
 		m.rows = append(m.rows, uiRow{
@@ -195,6 +207,7 @@ func (m *Model) appendBranchTreeRows() {
 			continue
 		}
 
+		parents := []string{repo.Path}
 		for _, r := range tree.Flatten(root, m.bareCollapsedGroups(repo.Path)) {
 			row := uiRow{
 				repoIdx: idx,
@@ -208,26 +221,10 @@ func (m *Model) appendBranchTreeRows() {
 				row.kind = rowLeaf
 				row.key = branchKey(repo.Path, r.Node.ID)
 			}
-			row.parentKey = m.branchParentKeyFor(repo.Path, r.Node, anchorID)
+			row.parentKey, parents = parentFromDepth(parents, r.Depth(), row.key)
 			m.rows = append(m.rows, row)
 		}
 	}
-}
-
-// branchParentKeyFor derives the collapse target of a branch-mode node: the
-// enclosing group, then the root anchor, then the repository header.
-func (m *Model) branchParentKeyFor(repoPath string, n *tree.Node, anchorID string) string {
-	id := n.ID
-	if n.Branch != nil && n.Branch.Name == anchorID {
-		return repoPath
-	}
-	if i := lastIndexByte(id, '/'); i >= 0 {
-		return groupKey(repoPath, id[:i])
-	}
-	if anchorID != "" {
-		return groupKey(repoPath, anchorID)
-	}
-	return repoPath
 }
 
 // appendGlobalFlatBranchRows renders branch mode's flat sort modes as one
@@ -261,33 +258,6 @@ func (m *Model) appendGlobalFlatBranchRows() {
 			flat:    true,
 		})
 	}
-}
-
-// parentKeyFor derives the collapse target of a node: its parent group when
-// nested, otherwise the repository header.
-func (m *Model) parentKeyFor(repoPath string, n *tree.Node) string {
-	if n.IsGroup() {
-		if i := lastIndexByte(n.ID, '/'); i >= 0 {
-			return groupKey(repoPath, n.ID[:i])
-		}
-		return repoPath
-	}
-	if n.Worktree != nil && !n.Worktree.Detached() {
-		branch := n.Worktree.Branch
-		if i := lastIndexByte(branch, '/'); i >= 0 {
-			return groupKey(repoPath, branch[:i])
-		}
-	}
-	return repoPath
-}
-
-func lastIndexByte(s string, b byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 func splitGroupKey(key string) (repoPath, groupID string, ok bool) {

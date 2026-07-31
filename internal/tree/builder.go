@@ -65,8 +65,28 @@ func Build(worktrees []domain.Worktree) *Node {
 			Worktree: &worktrees[i],
 		})
 	}
+	compactSingles(root)
 	sortTree(root)
 	return root
+}
+
+// compactSingles folds every group with exactly one child into that child,
+// prefixing the group's name (VS Code's compact-folders convention): a lone
+// feature/uc1-backend renders as one row instead of spending a row and an
+// indent level on a feature/ group that disambiguates nothing. Bottom-up,
+// so whole single-child chains collapse into a single label.
+func compactSingles(n *Node) {
+	for i, c := range n.Children {
+		if !c.IsGroup() {
+			continue
+		}
+		compactSingles(c)
+		if len(c.Children) == 1 {
+			child := c.Children[0]
+			child.Name = c.Name + "/" + child.Name
+			n.Children[i] = child
+		}
+	}
 }
 
 // BuildFlat constructs the flat rendering used by non-tree sort modes: every
@@ -90,23 +110,16 @@ func BuildFlat(worktrees []domain.Worktree, mode domain.SortMode) *Node {
 	return root
 }
 
-// BuildBranches constructs the branch-mode hierarchy (ADR 0014): the
-// default branch (when present) becomes the root anchor, with every other
-// branch nested beneath it by slash-delimited name; anchorID names it so
-// callers need not re-derive whether one was built. Without a resolvable
-// default branch the others hang directly off the root and anchorID is
-// empty. Group IDs stay un-prefixed either way, so collapse keys match the
-// worktree tree's.
-func BuildBranches(branches []domain.Branch, defaultBranch string) (root *Node, anchorID string) {
-	sub := &Node{}
-	var anchor *Node
+// BuildBranches constructs the branch-mode hierarchy (ADR 0014): branches
+// nested by their slash-delimited name prefixes, exactly like Build. The
+// protected default branch pins first through the shared sorting, mirroring
+// the worktree tree — nesting everything under it would wrongly read as an
+// ancestry claim, which branch names cannot make.
+func BuildBranches(branches []domain.Branch) *Node {
+	root := &Node{}
 	for i := range branches {
 		b := branches[i]
-		if b.Name == defaultBranch {
-			anchor = &Node{Name: b.Name, ID: b.Name, Branch: &branches[i]}
-			continue
-		}
-		node := sub
+		node := root
 		segments := strings.Split(b.Name, "/")
 		for _, seg := range segments[:len(segments)-1] {
 			node = node.childGroup(seg)
@@ -117,12 +130,9 @@ func BuildBranches(branches []domain.Branch, defaultBranch string) (root *Node, 
 			Branch: &branches[i],
 		})
 	}
-	sortTree(sub)
-	if anchor == nil {
-		return sub, ""
-	}
-	anchor.Children = sub.Children
-	return &Node{Children: []*Node{anchor}}, anchor.ID
+	compactSingles(root)
+	sortTree(root)
+	return root
 }
 
 // BuildFlatBranches constructs the flat branch rendering used by non-tree
