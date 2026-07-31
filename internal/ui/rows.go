@@ -38,11 +38,44 @@ func groupKey(repoPath, groupID string) string {
 // filter, sort mode, and collapse state.
 func (m *Model) rebuildRows() {
 	m.rows = m.rows[:0]
+	if m.sortMode.Flat() {
+		m.appendGlobalFlatRows()
+	} else {
+		m.appendTreeRows()
+	}
+	if m.focus >= len(m.rows) {
+		m.focus = len(m.rows) - 1
+	}
+	if m.focus < 0 {
+		m.focus = 0
+	}
+	m.ensureFocusVisible()
+}
+
+// repoWorktrees returns a repository's displayed worktrees, reporting
+// ok=false when the repo contributes nothing to the current view: hidden as
+// a single-worktree repo at info level 0 (nothing deletable there), or
+// emptied by the filter, the merged-only toggle, or the flat modes'
+// candidates-only rule. Shared by the row builders and the status line so
+// their counts always agree.
+func (m *Model) repoWorktrees(repo *domain.Repo) ([]domain.Worktree, bool) {
+	if m.infoLevel == 0 && len(repo.Worktrees) <= 1 {
+		return nil, false
+	}
+	visible := m.visibleWorktrees(repo)
+	if (m.filter != "" || m.mergedOnly || m.sortMode.Flat()) && len(visible) == 0 {
+		return nil, false
+	}
+	return visible, true
+}
+
+// appendTreeRows renders TreeView mode: a header per repository with the
+// branch hierarchy nested beneath it.
+func (m *Model) appendTreeRows() {
 	for idx := range m.repos {
 		repo := &m.repos[idx]
-		visible := tree.Filter(repo.Worktrees, m.filter, m.mergedOnly)
-		filtering := m.filter != "" || m.mergedOnly
-		if filtering && len(visible) == 0 {
+		visible, ok := m.repoWorktrees(repo)
+		if !ok {
 			continue
 		}
 		m.rows = append(m.rows, uiRow{
@@ -54,12 +87,6 @@ func (m *Model) rebuildRows() {
 			continue
 		}
 
-		var root *tree.Node
-		if m.sortMode.Flat() {
-			root = tree.BuildFlat(visible, m.sortMode)
-		} else {
-			root = tree.Build(visible)
-		}
 		// tree.Flatten keys collapse state by node ID; translate the
 		// repo-namespaced keys down to bare IDs for this repo.
 		bare := map[string]bool{}
@@ -68,12 +95,11 @@ func (m *Model) rebuildRows() {
 				bare[gid] = true
 			}
 		}
-		for _, r := range tree.Flatten(root, bare) {
+		for _, r := range tree.Flatten(tree.Build(visible), bare) {
 			row := uiRow{
 				repoIdx: idx,
 				node:    r.Node,
 				isLast:  r.IsLast,
-				flat:    m.sortMode.Flat(),
 			}
 			if r.Node.IsGroup() {
 				row.kind = rowGroup
@@ -82,22 +108,39 @@ func (m *Model) rebuildRows() {
 				row.kind = rowLeaf
 				row.key = r.Node.ID
 			}
-			if row.flat {
-				// Flat mode has no groups: everything collapses to the header.
-				row.parentKey = repo.Path
-			} else {
-				row.parentKey = m.parentKeyFor(repo.Path, r.Node)
-			}
+			row.parentKey = m.parentKeyFor(repo.Path, r.Node)
 			m.rows = append(m.rows, row)
 		}
 	}
-	if m.focus >= len(m.rows) {
-		m.focus = len(m.rows) - 1
+}
+
+// appendGlobalFlatRows renders the flat sort modes as one repo-spanning
+// list: ordering by staleness across repositories is the point of these
+// modes, so repo headers disappear and each row carries its repository as
+// a label instead.
+func (m *Model) appendGlobalFlatRows() {
+	var all []domain.Worktree
+	repoIdx := map[string]int{}
+	for idx := range m.repos {
+		visible, ok := m.repoWorktrees(&m.repos[idx])
+		if !ok {
+			continue
+		}
+		for _, w := range visible {
+			repoIdx[w.Path] = idx
+			all = append(all, w)
+		}
 	}
-	if m.focus < 0 {
-		m.focus = 0
+	for _, r := range tree.Flatten(tree.BuildFlat(all, m.sortMode), nil) {
+		m.rows = append(m.rows, uiRow{
+			kind:    rowLeaf,
+			repoIdx: repoIdx[r.Node.ID],
+			key:     r.Node.ID,
+			node:    r.Node,
+			isLast:  r.IsLast,
+			flat:    true,
+		})
 	}
-	m.ensureFocusVisible()
 }
 
 // parentKeyFor derives the collapse target of a node: its parent group when
@@ -136,7 +179,27 @@ func splitGroupKey(key string) (repoPath, groupID string, ok bool) {
 	return "", "", false
 }
 
+// visibleWorktrees returns a repository's worktrees after the text/merged
+// filter and, in flat sort modes, after dropping non-deletable entries
+// (the main worktree and the default branch): flat modes line up deletion
+// candidates, so infrastructure rows are pure noise there. The tree view
+// keeps them — they anchor the hierarchy.
+func (m *Model) visibleWorktrees(repo *domain.Repo) []domain.Worktree {
+	visible := tree.Filter(repo.Worktrees, m.filter, m.mergedOnly)
+	if !m.sortMode.Flat() {
+		return visible
+	}
+	kept := visible[:0]
+	for _, w := range visible {
+		if w.IsMain || (w.Branch != "" && w.Branch == repo.DefaultBranch) {
+			continue
+		}
+		kept = append(kept, w)
+	}
+	return kept
+}
+
 // visibleWorktreeCount counts a repository's worktrees after filtering.
 func (m *Model) visibleWorktreeCount(repo *domain.Repo) int {
-	return len(tree.Filter(repo.Worktrees, m.filter, m.mergedOnly))
+	return len(m.visibleWorktrees(repo))
 }

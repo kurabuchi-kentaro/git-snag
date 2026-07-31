@@ -17,15 +17,18 @@ var (
 	colorBad    = lipgloss.Color("1")       // prunable, failures, danger titles
 	colorSync   = lipgloss.Color("6")       // unpushed (remote out of sync)
 	colorFocus  = lipgloss.Color("8")       // focused-row background (theme gray)
+	colorSelBg  = lipgloss.Color("#22402c") // selected-row background (dark green: picked, check-marked)
+	colorRule   = lipgloss.Color("#2a2440") // header/footer outline (subdued accent-family dark)
 )
 
 var (
-	styleRepoName   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleBranch     = lipgloss.NewStyle().Foreground(colorGood)
+	// Repo headers stay colorless: purple now means branches and blue means
+	// directories/worktrees, so the header reads as a bold section title.
+	styleRepoName   = lipgloss.NewStyle().Bold(true)
+	styleWorktree   = lipgloss.NewStyle().Foreground(colorInfo)
 	styleGroup      = lipgloss.NewStyle().Foreground(colorInfo).Bold(true)
 	styleDim        = lipgloss.NewStyle().Faint(true)
-	styleProtected  = lipgloss.NewStyle().Faint(true)
-	styleSelected   = lipgloss.NewStyle().Foreground(colorAccent)
+	styleRule       = lipgloss.NewStyle().Foreground(colorRule)
 	styleAccent     = lipgloss.NewStyle().Foreground(colorAccent)
 	styleAccentBold = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleKey        = lipgloss.NewStyle().Bold(true)

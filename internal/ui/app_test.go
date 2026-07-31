@@ -296,6 +296,78 @@ func TestUpdate_sortCyclesAndSwitchesToFlat(t *testing.T) {
 	}
 }
 
+// --- info level ---
+
+func TestUpdate_infoLevelCyclesThroughThreeStates(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/x"))
+	for i, want := range []int{1, 2, 0} {
+		m = apply(t, m, press('i'))
+		if m.infoLevel != want {
+			t.Errorf("infoLevel after %d presses = %d, want %d", i+1, m.infoLevel, want)
+		}
+	}
+}
+
+func TestUpdate_infoLevelSkipsAllReposInFlatMode(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/x"))
+	m = apply(t, m, press('s')) // flat: the all-repos level changes nothing
+	for i, want := range []int{2, 0, 2} {
+		m = apply(t, m, press('i'))
+		if m.infoLevel != want {
+			t.Errorf("infoLevel after %d presses = %d, want %d (level 1 skipped)", i+1, m.infoLevel, want)
+		}
+	}
+	s := stripANSI(m.statusLine())
+	if strings.Contains(s, "all repos") {
+		t.Errorf("flat-mode label should not claim all repos: %q", s)
+	}
+	if !strings.Contains(s, "paths") {
+		t.Errorf("flat-mode label should mention paths at level 2: %q", s)
+	}
+}
+
+func TestView_singleWorktreeRepoHiddenByDefault(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("solo"), testRepo("multi", "feature/x"))
+	view := m.View().Content
+	if strings.Contains(view, "solo") {
+		t.Errorf("single-worktree repo should be hidden at info level 0:\n%s", view)
+	}
+	if !strings.Contains(view, "multi") {
+		t.Errorf("multi-worktree repo must stay visible:\n%s", view)
+	}
+	m = apply(t, m, press('i'))
+	if view := m.View().Content; !strings.Contains(view, "solo") {
+		t.Errorf("i should reveal single-worktree repos:\n%s", view)
+	}
+}
+
+func TestView_pathLineOnlyAtFullInfoLevel(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/x"))
+	if view := m.View().Content; strings.Contains(view, "alpha-wt/feature/x") {
+		t.Errorf("worktree path should be hidden below info level 2:\n%s", view)
+	}
+	m = apply(t, m, press('i'), press('i'))
+	if view := m.View().Content; !strings.Contains(view, "alpha-wt/feature/x") {
+		t.Errorf("second i should reveal worktree paths:\n%s", view)
+	}
+}
+
+func TestView_leafAnnotatesFullBranchName(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/x"))
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "x (feature/x)") {
+		t.Errorf("leaf should carry its branch in parens:\n%s", view)
+	}
+	if !strings.Contains(view, "alpha (main)") {
+		t.Errorf("main worktree leaf should carry its branch too:\n%s", view)
+	}
+}
+
 func TestUpdate_quitReturnsQuitCmd(t *testing.T) {
 	t.Parallel()
 	m := modelWith(t, testRepo("alpha"))
@@ -313,5 +385,71 @@ func TestView_flatModeShowsFullBranchNames(t *testing.T) {
 	view := m.View().Content
 	if !strings.Contains(view, "feature/x") {
 		t.Errorf("flat view should show the full branch name:\n%s", view)
+	}
+}
+
+func TestView_flatModeHidesNonDeletableWorktrees(t *testing.T) {
+	t.Parallel()
+	repo := testRepo("alpha", "feature/x")
+	repo.DefaultBranch = "main"
+	m := modelWith(t, repo)
+
+	m = apply(t, m, press('s')) // flat: deletion candidates only
+	view := stripANSI(m.View().Content)
+	if strings.Contains(view, "(main)") {
+		t.Errorf("flat view should hide the main/default-branch worktree:\n%s", view)
+	}
+
+	m = apply(t, m, press('s'), press('s'), press('s')) // back to tree
+	if view := stripANSI(m.View().Content); !strings.Contains(view, "(main)") {
+		t.Errorf("tree view should keep the main worktree visible:\n%s", view)
+	}
+}
+
+func TestView_flatModeSortsAcrossRepos(t *testing.T) {
+	t.Parallel()
+	oldRepo := testRepo("alpha", "feature/old")
+	oldRepo.Worktrees[1].LastCommitTime = time.Unix(1_500_000_000, 0)
+	freshRepo := testRepo("beta", "feature/new")
+	freshRepo.Worktrees[1].LastCommitTime = time.Unix(1_650_000_000, 0)
+	midRepo := testRepo("gamma", "feature/mid")
+	midRepo.Worktrees[1].LastCommitTime = time.Unix(1_600_000_000, 0)
+	m := modelWith(t, oldRepo, freshRepo, midRepo)
+
+	m = apply(t, m, press('s')) // StaleFirst
+	var branches []string
+	for _, r := range m.rows {
+		if r.kind == rowRepo {
+			t.Error("global flat mode should have no repo headers")
+		}
+		if r.kind == rowLeaf {
+			branches = append(branches, r.node.Worktree.Branch)
+		}
+	}
+	want := []string{"feature/old", "feature/mid", "feature/new"}
+	if len(branches) != len(want) {
+		t.Fatalf("branches = %v, want %v", branches, want)
+	}
+	for i := range want {
+		if branches[i] != want[i] {
+			t.Fatalf("branches = %v, want %v (oldest first across repos)", branches, want)
+		}
+	}
+	// Every row names its repository, since headers are gone.
+	view := stripANSI(m.View().Content)
+	for _, label := range []string{"/work/alpha ›", "/work/beta ›", "/work/gamma ›"} {
+		if !strings.Contains(view, label) {
+			t.Errorf("flat rows should carry the repo label %q:\n%s", label, view)
+		}
+	}
+}
+
+func TestView_flatModeDropsReposWithNoCandidates(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("solo"), testRepo("multi", "feature/x"))
+	m = apply(t, m, press('i'), press('s')) // reveal solo, then go flat
+	view := stripANSI(m.View().Content)
+	if strings.Contains(view, "solo") {
+		t.Errorf("a repo with no deletion candidates should vanish in flat mode:\n%s", view)
 	}
 }

@@ -7,31 +7,42 @@ import (
 )
 
 // overlayModal composites a purple-framed modal over the base view: the
-// backdrop is dimmed cell by cell, the modal is centered, and dx/dy jitter
-// its position (explosion shake). ADR 0013.
+// backdrop is dimmed cell by cell and the modal is centered. ADR 0013.
 //
 // The frame is drawn as a uv.StyledString at its own rectangle: Canvas's
 // Compose ignores layer positions (that is the Compositor's job) and a
 // StyledString clears whatever area it is given, so composing the frame
 // over the full canvas would erase the backdrop and pin the modal top-left.
-func overlayModal(base, content string, width, height, dx, dy int) string {
+func overlayModal(base, content string, width, height int) string {
+	return composeModal(base, content, width, height, true)
+}
+
+// overlayModalVivid is overlayModal without the backdrop dim, for acts
+// where the backdrop itself is the show (the explosion).
+func overlayModalVivid(base, content string, width, height int) string {
+	return composeModal(base, content, width, height, false)
+}
+
+func composeModal(base, content string, width, height int, dim bool) string {
 	if width < 1 || height < 1 {
 		return base
 	}
 	canvas := lipgloss.NewCanvas(width, height)
 	uv.NewStyledString(base).Draw(canvas, canvas.Bounds())
-	for y := range height {
-		for x := range width {
-			if cell := canvas.CellAt(x, y); cell != nil {
-				cell.Style.Attrs |= uv.AttrFaint
+	if dim {
+		for y := range height {
+			for x := range width {
+				if cell := canvas.CellAt(x, y); cell != nil {
+					cell.Style.Attrs |= uv.AttrFaint
+				}
 			}
 		}
 	}
 
 	frame := styleModal.Render(content)
 	fw, fh := lipgloss.Width(frame), lipgloss.Height(frame)
-	x := max((width-fw)/2+dx, 0)
-	y := max((height-fh)/2+dy, 0)
+	x := max((width-fw)/2, 0)
+	y := max((height-fh)/2, 0)
 	uv.NewStyledString(frame).Draw(canvas, uv.Rect(x, y, fw, fh))
 	return canvas.Render()
 }

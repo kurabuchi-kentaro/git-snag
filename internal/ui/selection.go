@@ -31,16 +31,12 @@ func selectablePaths(n *tree.Node) []string {
 
 // subtreeFor returns the node a selection gesture acts on: the row's own
 // node, or the repository's whole (filtered) tree for a header row.
+// Headers only exist in tree mode — the global flat list has none.
 func (m *Model) subtreeFor(row uiRow) *tree.Node {
 	if row.node != nil {
 		return row.node
 	}
-	repo := &m.repos[row.repoIdx]
-	visible := tree.Filter(repo.Worktrees, m.filter, m.mergedOnly)
-	if m.sortMode.Flat() {
-		return tree.BuildFlat(visible, m.sortMode)
-	}
-	return tree.Build(visible)
+	return tree.Build(m.visibleWorktrees(&m.repos[row.repoIdx]))
 }
 
 // toggleSelection implements space: a leaf toggles itself; a group or repo

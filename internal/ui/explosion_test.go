@@ -14,12 +14,6 @@ func TestTierFor_scalesWithItemCount(t *testing.T) {
 	if one.frames >= few.frames || few.frames >= many.frames {
 		t.Errorf("frames should grow with count: %d, %d, %d", one.frames, few.frames, many.frames)
 	}
-	if one.shake || few.shake {
-		t.Error("small tiers should not shake")
-	}
-	if !many.shake {
-		t.Error("the big tier should shake")
-	}
 }
 
 func TestRenderExplodeFrame_sizeAndCharset(t *testing.T) {

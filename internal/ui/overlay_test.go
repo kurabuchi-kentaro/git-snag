@@ -10,7 +10,7 @@ import (
 func TestOverlayModal_centersContentOverBase(t *testing.T) {
 	t.Parallel()
 	base := strings.TrimSuffix(strings.Repeat("bbbbbbbbbbbbbbbbbbbb\n", 10), "\n")
-	out := overlayModal(base, "hello", 20, 10, 0, 0)
+	out := overlayModal(base, "hello", 20, 10)
 	if !strings.Contains(out, "hello") {
 		t.Errorf("overlay should contain the modal content:\n%s", out)
 	}
@@ -21,7 +21,7 @@ func TestOverlayModal_centersContentOverBase(t *testing.T) {
 
 func TestOverlayModal_degradesGracefullyOnZeroSize(t *testing.T) {
 	t.Parallel()
-	if got := overlayModal("base", "modal", 0, 0, 0, 0); got != "base" {
+	if got := overlayModal("base", "modal", 0, 0); got != "base" {
 		t.Errorf("zero-size overlay should return the base view, got %q", got)
 	}
 }
@@ -67,7 +67,7 @@ func TestOverlayModal_keepsBackdropVisibleAndCentersFrame(t *testing.T) {
 	const width, height = 100, 30
 	baseLine := strings.Repeat("B", width)
 	base := strings.TrimSuffix(strings.Repeat(baseLine+"\n", height), "\n")
-	out := stripANSI(overlayModal(base, "MODAL-CONTENT", width, height, 0, 0))
+	out := stripANSI(overlayModal(base, "MODAL-CONTENT", width, height))
 	lines := strings.Split(out, "\n")
 
 	if !strings.Contains(out, "BBBB") {

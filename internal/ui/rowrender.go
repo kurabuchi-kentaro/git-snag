@@ -11,8 +11,10 @@ import (
 )
 
 // relTimeCap is the ceiling of relative timestamps: precision past six
-// months carries no decision value when hunting stale worktrees.
-const relTimeCap = "6mo+ ago"
+// months carries no decision value when hunting stale worktrees. The
+// warning color marks the cap, so no "+" is needed and every value fits
+// in three cells.
+const relTimeCap = "6mo"
 
 // timeColWidth is the fixed timestamp column, sized to the widest value
 // (relTimeCap) so the tag cluster aligns across rows.
@@ -29,16 +31,16 @@ func RelativeTime(t, now time.Time) string {
 	case d < time.Minute:
 		return "now"
 	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		return fmt.Sprintf("%dm", int(d.Minutes()))
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	days := int(d.Hours() / 24)
 	switch {
 	case days <= 30:
-		return fmt.Sprintf("%dd ago", days)
+		return fmt.Sprintf("%dd", days)
 	case days < 180:
-		return fmt.Sprintf("%dmo ago", days/30)
+		return fmt.Sprintf("%dmo", days/30)
 	default:
 		return relTimeCap
 	}
@@ -88,8 +90,8 @@ type rowState struct {
 	focused  bool
 	selected bool
 	inRange  bool
-	// muted dims the name: the repository's default branch reads as
-	// infrastructure, not a deletion candidate.
+	// muted grays the whole entry: the repository's default branch reads
+	// as infrastructure, not a deletion candidate.
 	muted bool
 }
 
@@ -97,17 +99,21 @@ type rowState struct {
 // inside the visual-mode range, a space otherwise.
 func gutter(st rowState) string {
 	if st.inRange {
-		return bgIf(styleAccent, st.focused).Render(gutterBar)
+		return bgIf(styleAccent, st).Render(gutterBar)
 	}
-	return bgIf(lipgloss.NewStyle(), st.focused).Render(" ")
+	return bgIf(lipgloss.NewStyle(), st).Render(" ")
 }
 
-// bgIf paints the focused-row background onto a segment style; every
-// segment of a focused row must carry it, or inner style resets would
-// punch holes in the highlight.
-func bgIf(s lipgloss.Style, focused bool) lipgloss.Style {
-	if focused {
+// bgIf paints the row background onto a segment style — the theme gray for
+// focus, the dark accent for selection (focus wins when both hold). Every
+// segment of the row must carry it, or inner style resets would punch
+// holes in the highlight.
+func bgIf(s lipgloss.Style, st rowState) lipgloss.Style {
+	switch {
+	case st.focused:
 		return s.Background(colorFocus)
+	case st.selected:
+		return s.Background(colorSelBg)
 	}
 	return s
 }
@@ -119,8 +125,17 @@ type tagPart struct {
 	style lipgloss.Style
 }
 
-// tagParts returns the status tag cluster for a worktree.
-func tagParts(w domain.Worktree, ic iconSet) []tagPart {
+// tagParts returns the status tag cluster for a worktree: bare glyphs, with
+// the text legend living in the help modal. A muted (default-branch)
+// worktree is not a deletion candidate, so its status noise is suppressed —
+// only the home marker remains.
+func tagParts(w domain.Worktree, ic iconSet, muted bool) []tagPart {
+	if muted {
+		if w.IsMain {
+			return []tagPart{{ic.main, styleDim}}
+		}
+		return nil
+	}
 	var tags []tagPart
 	if w.IsCurrent {
 		tags = append(tags, tagPart{ic.current, styleDim})
@@ -129,19 +144,19 @@ func tagParts(w domain.Worktree, ic iconSet) []tagPart {
 		tags = append(tags, tagPart{ic.main, styleDim})
 	}
 	if w.Dirty {
-		tags = append(tags, tagPart{ic.dirty + " dirty", styleWarn})
+		tags = append(tags, tagPart{ic.dirty, styleWarn})
 	}
 	if w.Locked {
-		tags = append(tags, tagPart{ic.locked + " locked", styleInfo})
+		tags = append(tags, tagPart{ic.locked, styleInfo})
 	}
 	if w.Merged {
-		tags = append(tags, tagPart{ic.merged + " merged", styleGood})
+		tags = append(tags, tagPart{ic.merged, styleGood})
 	}
 	if w.UnpushedCount > 0 {
 		tags = append(tags, tagPart{fmt.Sprintf("%s%d", ic.unpushed, w.UnpushedCount), styleSync})
 	}
 	if w.Prunable {
-		tags = append(tags, tagPart{ic.prunable + " gone", styleBad})
+		tags = append(tags, tagPart{ic.prunable, styleBad})
 	}
 	return tags
 }
@@ -159,22 +174,43 @@ func truncate(s string, width int) string {
 	return string(runes) + "…"
 }
 
+// branchAnnotation renders the " (branch)" suffix a leaf carries after its
+// directory name: the full branch name, or the detached-HEAD label.
+func branchAnnotation(w domain.Worktree) string {
+	if w.Detached() {
+		sha := w.HeadSHA
+		if len(sha) > 7 {
+			sha = sha[:7]
+		}
+		return "(detached: " + sha + ")"
+	}
+	return "(" + w.Branch + ")"
+}
+
 // renderLeafLine renders a worktree's first display line: gutter, connector
-// prefix, selection mark, name, then tags and relative time flush right.
+// prefix, selection mark, directory name with its branch annotation, then
+// tags and relative time flush right. The right side is reserved space —
+// tags must never be pushed out, so the left side truncates to fit
+// (annotation first, then the name).
 func renderLeafLine(prefix string, w domain.Worktree, name string, width int, now time.Time, st rowState, ic iconSet) string {
 	width-- // the gutter owns the first cell
 
-	// No placeholder mark: the check appears only on selected rows, and
-	// protection reads from the dimmed name instead of a dash.
+	// No placeholder mark: the check appears only on selected rows.
 	mark := ""
 	if st.selected {
 		mark = "✓ "
 	}
 
 	// The timestamp gets a fixed right-aligned column so tags end at the
-	// same cell on every row regardless of how long "ago" is.
-	timeStr := fmt.Sprintf("%*s", timeColWidth, RelativeTime(w.LastCommitTime, now))
-	tags := tagParts(w, ic)
+	// same cell on every row. Half a year of silence is exactly what this
+	// tool hunts, so the capped value carries the warning color.
+	rel := RelativeTime(w.LastCommitTime, now)
+	timeStyle := styleDim
+	if rel == relTimeCap {
+		timeStyle = styleWarn
+	}
+	timeStr := fmt.Sprintf("%*s", timeColWidth, rel)
+	tags := tagParts(w, ic, st.muted)
 	rightWidth := timeColWidth
 	for _, t := range tags {
 		rightWidth += lipgloss.Width(t.text) + 1 // trailing gap before next part
@@ -183,45 +219,57 @@ func renderLeafLine(prefix string, w domain.Worktree, name string, width int, no
 		rightWidth++ // two-cell gap between tags and the time column
 	}
 
-	nameStyle := styleBranch
-	switch {
-	case st.selected:
-		nameStyle = styleSelected
-	case w.Protected() || st.muted:
-		nameStyle = styleProtected
+	ann := branchAnnotation(w)
+	nameStyle, annStyle := styleWorktree, styleAccent
+	if w.Detached() {
+		annStyle = styleDim
+	}
+	if st.muted {
+		nameStyle, annStyle = styleDim, styleDim
 	}
 
-	fixed := lipgloss.Width(prefix) + lipgloss.Width(mark)
-	nameAvail := width - fixed - rightWidth - 1
-	if nameAvail < 1 {
-		// Too narrow for the full layout: name and timestamp only.
-		line := truncate(mark+name, max(width-lipgloss.Width(timeStr)-1, 1))
-		return gutter(st) + bgIf(styleDim, st.focused).Render(padLine(line, max(width-lipgloss.Width(timeStr), 1))+timeStr)
+	// Budget the left side: prefix, then name, then annotation, each
+	// giving way to the reserved right side.
+	avail := width - rightWidth - 1 - lipgloss.Width(mark)
+	if lipgloss.Width(prefix) > avail-8 {
+		prefix = truncate(prefix, max(avail-8, 1))
 	}
-	if lipgloss.Width(name) > nameAvail {
-		name = truncate(name, nameAvail)
+	avail -= lipgloss.Width(prefix)
+	if lipgloss.Width(name) > avail {
+		name = truncate(name, max(avail, 1))
 	}
-	pad := width - fixed - lipgloss.Width(name) - rightWidth
-	if pad < 1 {
-		pad = 1
+	if annAvail := avail - lipgloss.Width(name) - 1; annAvail < 2 {
+		ann = ""
+	} else if lipgloss.Width(ann) > annAvail {
+		ann = truncate(ann, annAvail)
 	}
+
+	used := lipgloss.Width(prefix) + lipgloss.Width(mark) + lipgloss.Width(name)
+	if ann != "" {
+		used += 1 + lipgloss.Width(ann)
+	}
+	pad := max(width-used-rightWidth, 1)
 
 	var b strings.Builder
 	b.WriteString(gutter(st))
-	b.WriteString(bgIf(styleDim, st.focused).Render(prefix))
+	b.WriteString(bgIf(styleDim, st).Render(prefix))
 	if mark != "" {
-		b.WriteString(bgIf(styleSelected, st.focused).Render(mark))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(mark))
 	}
-	b.WriteString(bgIf(nameStyle, st.focused).Render(name))
-	b.WriteString(bgIf(lipgloss.NewStyle(), st.focused).Render(strings.Repeat(" ", pad)))
+	b.WriteString(bgIf(nameStyle, st).Render(name))
+	if ann != "" {
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
+		b.WriteString(bgIf(annStyle, st).Render(ann))
+	}
+	b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(strings.Repeat(" ", pad)))
 	for _, t := range tags {
-		b.WriteString(bgIf(t.style, st.focused).Render(t.text))
-		b.WriteString(bgIf(lipgloss.NewStyle(), st.focused).Render(" "))
+		b.WriteString(bgIf(t.style, st).Render(t.text))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
 	}
 	if len(tags) > 0 {
-		b.WriteString(bgIf(lipgloss.NewStyle(), st.focused).Render(" "))
+		b.WriteString(bgIf(lipgloss.NewStyle(), st).Render(" "))
 	}
-	b.WriteString(bgIf(styleDim, st.focused).Render(timeStr))
+	b.WriteString(bgIf(timeStyle, st).Render(timeStr))
 	return b.String()
 }
 
@@ -236,8 +284,8 @@ func renderPathLine(prefix string, w domain.Worktree, width int, st rowState) st
 	}
 	line := truncate(prefix+path, width)
 	pad := width - lipgloss.Width(line)
-	if pad > 0 && st.focused {
+	if pad > 0 && (st.focused || st.selected) {
 		line += strings.Repeat(" ", pad)
 	}
-	return gutter(st) + bgIf(styleDim, st.focused).Render(line)
+	return gutter(st) + bgIf(styleDim, st).Render(line)
 }

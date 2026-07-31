@@ -23,7 +23,6 @@ import (
 type explosionTier struct {
 	frames    int
 	radiusMul float64
-	shake     bool
 	chars     string
 }
 
@@ -36,7 +35,7 @@ func tierFor(count int) explosionTier {
 	case count <= 4:
 		return explosionTier{frames: 25, radiusMul: 1.0, chars: "*.@#&+%"}
 	default:
-		return explosionTier{frames: 35, radiusMul: 1.35, shake: true, chars: "*.@#&+%$!"}
+		return explosionTier{frames: 35, radiusMul: 1.35, chars: "*.@#&+%$!"}
 	}
 }
 
@@ -95,22 +94,12 @@ var explosionStyles = []lipgloss.Style{
 	styleBad,
 }
 
-// viewExplosion renders the current animation frame inside the delete
-// modal's act frame (ADR 0013: the blast stays inside the window,
-// lazygit-style, instead of taking over the screen).
+// viewExplosion renders the current animation frame across the whole
+// backdrop: the blast plays behind the floating act frame, replacing the
+// tree for the duration.
 func (m Model) viewExplosion() string {
-	width, height := m.actWidth(), m.actHeight(modalChromeLines+1)
+	width, height := max(m.width, 10), max(m.height, 5)
 	img := renderExplodeFrame(width, height, m.explosionFrame, m.explosionTier, m.explosionSeed)
 	style := explosionStyles[m.explosionFrame*len(explosionStyles)/(m.explosionTier.frames+1)%len(explosionStyles)]
 	return style.Render(img)
-}
-
-// explosionJitter shakes the modal frame by a cell or two on the big tier.
-func (m Model) explosionJitter() (dx, dy int) {
-	if !m.explosionTier.shake {
-		return 0, 0
-	}
-	// #nosec G404 -- visual jitter only.
-	rng := rand.New(rand.NewSource(m.explosionSeed - int64(m.explosionFrame)))
-	return rng.Intn(3) - 1, rng.Intn(2)
 }

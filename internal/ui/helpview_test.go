@@ -13,7 +13,10 @@ func TestHelp_opensAndClosesWithAnyKey(t *testing.T) {
 		t.Fatal("? should open help")
 	}
 	view := m.View().Content
-	for _, want := range []string{"Keybindings", "visual select", "delete selected", "merged only"} {
+	for _, want := range []string{
+		"Keybindings", "visual select", "delete selected", "merged only",
+		"Tags", "uncommitted changes", "directory missing",
+	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help view missing %q:\n%s", want, view)
 		}

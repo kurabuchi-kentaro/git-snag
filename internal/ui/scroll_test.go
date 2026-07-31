@@ -7,7 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// tallModel builds a model whose rows far exceed the terminal height.
+// tallModel builds a model whose rows far exceed the terminal height, at
+// full info level so leaves occupy two lines (the harder scrolling case).
 func tallModel(t *testing.T) Model {
 	t.Helper()
 	m := modelWith(t,
@@ -16,6 +17,7 @@ func tallModel(t *testing.T) Model {
 		testRepo("r03", "aa", "bb", "cc", "dd"),
 		testRepo("r04", "aa", "bb", "cc", "dd"),
 	)
+	m = apply(t, m, press('i'), press('i'))
 	return apply(t, m, tea.WindowSizeMsg{Width: 80, Height: 15})
 }
 
@@ -43,7 +45,7 @@ func TestScroll_focusedRowStaysVisibleWhileMovingDown(t *testing.T) {
 	if !strings.Contains(view, "r04-wt/dd") {
 		t.Errorf("focused (last) row should be visible:\n%s", view)
 	}
-	if strings.Contains(view, "r01  ") {
+	if strings.Contains(view, "/work/r01 ") {
 		t.Errorf("first header should have scrolled off screen:\n%s", view)
 	}
 }

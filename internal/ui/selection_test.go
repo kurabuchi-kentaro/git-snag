@@ -232,7 +232,7 @@ func TestVisual_rangeSkipsProtectedAndGroupRows(t *testing.T) {
 	}
 }
 
-func TestVisual_ignoresFilterMergedSortAndDelete(t *testing.T) {
+func TestVisual_ignoresFilterMergedAndSort(t *testing.T) {
 	t.Parallel()
 	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b"))
 	focusOn(t, &m, leafNamed("a"))
@@ -243,6 +243,67 @@ func TestVisual_ignoresFilterMergedSortAndDelete(t *testing.T) {
 	}
 	if m.visualAnchor == -1 {
 		t.Error("still in visual mode after ignored keys")
+	}
+}
+
+func TestVisual_qCancelsLikeEscape(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b"))
+	focusOn(t, &m, leafNamed("a"))
+	var model tea.Model = apply(t, m, press('v'), press('j'))
+	model, cmd := model.Update(press('q'))
+	got := model.(Model)
+	if cmd != nil {
+		t.Error("q in visual mode should cancel the mode, not quit the app")
+	}
+	if got.visualAnchor != -1 {
+		t.Error("q should leave visual mode")
+	}
+	if len(selectedBranches(got)) != 0 {
+		t.Errorf("q should revert the range selection: %v", selectedBranches(got))
+	}
+}
+
+func TestVisual_ctrlCStillQuits(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a"))
+	focusOn(t, &m, leafNamed("a"))
+	var model tea.Model = apply(t, m, press('v'))
+	_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Error("ctrl+c should quit even in visual mode")
+	}
+}
+
+func TestVisual_deleteConfirmsRangeAndOpensConfirm(t *testing.T) {
+	t.Parallel()
+	m := modelWith(t, testRepo("alpha", "feature/a", "feature/b"))
+	focusOn(t, &m, leafNamed("a"))
+	m = apply(t, m, press('v'), press('j'), press('d'))
+	if m.visualAnchor != -1 {
+		t.Error("d should leave visual mode")
+	}
+	if m.phase != phaseConfirming {
+		t.Errorf("d should open the confirm modal, phase = %v", m.phase)
+	}
+	got := selectedBranches(m)
+	if !got["feature/a"] || !got["feature/b"] {
+		t.Errorf("the visual range should be the pending selection: %v", got)
+	}
+}
+
+func TestVisual_deleteWithEmptyRangeStaysBrowsing(t *testing.T) {
+	t.Parallel()
+	// An anchor on the protected main leaf selects nothing; d must not
+	// open an empty confirm.
+	m := modelWith(t, testRepo("alpha", "feature/a"))
+	focusOn(t, &m, leafNamed("main"))
+	m = apply(t, m, press('v'), press('d'))
+	if m.phase != phaseBrowsing {
+		t.Errorf("d over an empty range should stay browsing, phase = %v", m.phase)
+	}
+	if m.visualAnchor != -1 {
+		t.Error("d should still leave visual mode")
 	}
 }
 
@@ -270,13 +331,13 @@ func TestEscape_outsideVisualClearsSelection(t *testing.T) {
 	}
 }
 
-func TestFooter_showsSelectionCount(t *testing.T) {
+func TestView_showsSelectionCount(t *testing.T) {
 	t.Parallel()
 	m := modelWith(t, testRepo("alpha", "feature/a"))
 	focusOn(t, &m, leafNamed("a"))
 	m = apply(t, m, space())
-	view := m.View().Content
-	if !strings.Contains(view, "1 selected") {
-		t.Errorf("view should mention selection count:\n%s", view)
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "1/2 worktrees selected") {
+		t.Errorf("view should mention the selection count:\n%s", view)
 	}
 }

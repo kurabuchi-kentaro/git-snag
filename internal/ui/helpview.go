@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 )
 
 // WithAnimation returns a copy of the model with the deletion animation
@@ -31,19 +32,42 @@ func (m Model) WithIcons(name string) Model {
 	return m
 }
 
-// viewHelp renders the keybinding cheat sheet as modal content.
+// viewHelp renders the keybinding cheat sheet and the tag legend (rows show
+// bare glyphs; their meaning lives here) side by side, so the modal stays
+// within a 24-line terminal.
 func (m Model) viewHelp() string {
-	var b strings.Builder
-	b.WriteString(styleKey.Render("Keybindings") + "\n\n")
+	var kb strings.Builder
+	kb.WriteString(styleKey.Render("Keybindings") + "\n\n")
 	rows := []key.Binding{
 		keys.Up, keys.Down, keys.Collapse, keys.Expand,
 		keys.Select, keys.Visual, keys.Delete, keys.Escape,
-		keys.Filter, keys.Merged, keys.Sort, keys.Help, keys.Quit,
+		keys.Filter, keys.Merged, keys.Sort, keys.Info, keys.Help, keys.Quit,
 	}
 	for _, binding := range rows {
 		h := binding.Help()
-		fmt.Fprintf(&b, "%s %s\n", styleKey.Render(fmt.Sprintf("%-10s", h.Key)), styleDim.Render(h.Desc))
+		fmt.Fprintf(&kb, "%s %s\n", styleKey.Render(fmt.Sprintf("%-10s", h.Key)), styleDim.Render(h.Desc))
 	}
-	b.WriteString("\n" + styleDim.Render("press any key to close"))
-	return b.String()
+
+	var tg strings.Builder
+	tg.WriteString(styleKey.Render("Tags") + "\n\n")
+	legend := []struct {
+		glyph string
+		style lipgloss.Style
+		desc  string
+	}{
+		{m.icons.current, styleDim, "current worktree"},
+		{m.icons.main, styleDim, "main worktree"},
+		{m.icons.dirty, styleWarn, "dirty (uncommitted changes)"},
+		{m.icons.locked, styleInfo, "locked"},
+		{m.icons.merged, styleGood, "merged into the default branch"},
+		{m.icons.unpushed + "n", styleSync, "n commits not on the remote"},
+		{m.icons.prunable, styleBad, "gone (directory missing)"},
+	}
+	for _, e := range legend {
+		pad := strings.Repeat(" ", max(4-lipgloss.Width(e.glyph), 1))
+		fmt.Fprintf(&tg, "%s%s%s\n", e.style.Render(e.glyph), pad, styleDim.Render(e.desc))
+	}
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, kb.String(), "    ", tg.String())
+	return body + "\n" + styleDim.Render("press any key to close")
 }
