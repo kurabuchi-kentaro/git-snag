@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -237,6 +238,35 @@ func TestExecute_emptyBatchIsNoOp(t *testing.T) {
 	results := Execute(t.Context(), nil)
 	if len(results) != 0 {
 		t.Errorf("results = %+v, want empty", results)
+	}
+}
+
+func TestExecute_removesEmptyParentDirsOfNestedWorktrees(t *testing.T) {
+	t.Parallel()
+	repo := testutil.NewRepo(t)
+	container := filepath.Join(testutil.TempDir(t), "wt")
+	nested := filepath.Join(container, "feature", "fix", "login")
+	repo.Git("worktree", "add", "-q", "-b", "feature/fix/login", nested)
+	sibling := filepath.Join(container, "keep")
+	repo.Git("worktree", "add", "-q", "-b", "keep", sibling)
+
+	w := findWt(t, repo.Dir, "feature/fix/login")
+	results := Execute(t.Context(), []PlanItem{item(repo.Dir, w, true)})
+	if results[0].WorktreeErr != nil {
+		t.Fatalf("WorktreeErr = %v", results[0].WorktreeErr)
+	}
+
+	// The nesting dirs the worktree carved out must not linger empty.
+	for _, gone := range []string{nested, filepath.Dir(nested), filepath.Join(container, "feature")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s should be removed once empty", gone)
+		}
+	}
+	// Anything still holding content survives.
+	for _, kept := range []string{container, sibling} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s must survive: %v", kept, err)
+		}
 	}
 }
 

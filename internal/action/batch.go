@@ -6,6 +6,8 @@ package action
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
 	"github.com/kurabuchi-kentaro/git-snag/internal/gitcli"
@@ -59,6 +61,7 @@ func Execute(ctx context.Context, items []PlanItem) []Result {
 		if results[i].WorktreeErr != nil {
 			continue
 		}
+		removeEmptyParents(it.Worktree.Path, it.RepoPath)
 
 		if it.DeleteBranch && !it.Worktree.Detached() {
 			results[i].BranchAttempted = true
@@ -82,6 +85,20 @@ func removeWorktree(ctx context.Context, git *gitcli.Client, it PlanItem) error 
 		return nil
 	}
 	return git.RemoveWorktree(ctx, it.RepoPath, it.Worktree.Path, true)
+}
+
+// removeEmptyParents deletes the nesting directories a slash-named worktree
+// leaves behind (feature/, feature/fix/, ...): it climbs from the removed
+// path's parent, stopping at the first directory that is not empty, at the
+// repository, or at the filesystem root. os.Remove refuses to delete
+// non-empty directories, so the climb cannot take anything that still holds
+// content — the error is the stop condition, not a failure worth reporting.
+func removeEmptyParents(path, repoPath string) {
+	for dir := filepath.Dir(path); dir != repoPath && filepath.Dir(dir) != dir; dir = filepath.Dir(dir) {
+		if os.Remove(dir) != nil {
+			return
+		}
+	}
 }
 
 // pruneOnce prunes a repository at most once per batch and attributes the
