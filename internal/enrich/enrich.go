@@ -55,6 +55,15 @@ func (e *Enricher) Enrich(ctx context.Context, repoPath string) (domain.Repo, er
 		if m, mergedErr := e.git.MergedBranches(ctx, repoPath, defaultBranch); mergedErr == nil {
 			merged = m
 		}
+		// Merges usually land on the remote (PRs), so the remote-tracking
+		// default is often ahead of an un-pulled local one. Union both
+		// targets so those merges still count; a missing origin/<default>
+		// ref just skips this half.
+		if m, mergedErr := e.git.MergedBranches(ctx, repoPath, "origin/"+defaultBranch); mergedErr == nil {
+			for branch := range m {
+				merged[branch] = true
+			}
+		}
 	case errors.Is(err, gitcli.ErrNoDefaultBranch):
 		// No origin: merge detection is skipped by contract (ADR 0009).
 	default:

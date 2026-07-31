@@ -62,6 +62,23 @@ func TestEnrich_mergedFlagsAgainstDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestEnrich_mergedSeesRemoteDefaultAheadOfLocal(t *testing.T) {
+	t.Parallel()
+	fx := testutil.NewRepo(t)
+	fx.SetupOrigin()
+	wt := fx.AddWorktree("feature/remote-merged")
+	fx.CommitIn(wt, "work")
+	// Merge on the remote (a PR, in real life): the branch lands on
+	// origin/main while the local main stays un-pulled behind it.
+	fx.GitIn(wt, "push", "-q", "origin", "feature/remote-merged:main")
+	fx.Git("fetch", "-q", "origin")
+
+	got := byBranch(t, enriched(t, fx.Dir, t.TempDir()))
+	if !got["feature/remote-merged"].Merged {
+		t.Error("a branch merged into origin/main should be Merged even when the local main is behind")
+	}
+}
+
 func TestEnrich_unpushedCountsOnlyWithUpstream(t *testing.T) {
 	t.Parallel()
 	fx := testutil.NewRepo(t)
