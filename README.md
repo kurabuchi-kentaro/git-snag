@@ -8,7 +8,7 @@ experiments abandoned months ago, directories you `rm -rf`'d but git still
 remembers. git-snag finds them all and lets you clear them out — worktree
 and branch together, across every repository under your current directory.
 
-<!-- TODO: demo GIF (vhs/asciinema recording of browse → select → boom) -->
+![git-snag: browse worktrees, select a batch, confirm, and watch them go](docs/media/demo.gif)
 
 ## What it does
 
