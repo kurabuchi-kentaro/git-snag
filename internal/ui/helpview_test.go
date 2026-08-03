@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/kurabuchi-kentaro/git-snag/internal/version"
 )
 
 func TestHelp_opensAndClosesWithAnyKey(t *testing.T) {
@@ -16,6 +18,7 @@ func TestHelp_opensAndClosesWithAnyKey(t *testing.T) {
 	for _, want := range []string{
 		"Keybindings", "visual select", "delete selected", "merged only",
 		"Tags", "uncommitted changes", "directory missing",
+		"git-snag " + version.Version,
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help view missing %q:\n%s", want, view)

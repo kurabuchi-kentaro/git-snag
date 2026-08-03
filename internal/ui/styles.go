@@ -37,6 +37,7 @@ var (
 	// purple styleBadge for transient gestures like visual mode (ADR 0014).
 	styleBadgeInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("#f5f2fa")).Background(colorInfo).Bold(true)
 	styleGood      = lipgloss.NewStyle().Foreground(colorGood)
+	styleGoodBold  = lipgloss.NewStyle().Foreground(colorGood).Bold(true)
 	styleWarn      = lipgloss.NewStyle().Foreground(colorWarn)
 	styleInfo      = lipgloss.NewStyle().Foreground(colorInfo)
 	styleBad       = lipgloss.NewStyle().Foreground(colorBad)

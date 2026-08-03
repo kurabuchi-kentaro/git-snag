@@ -726,14 +726,15 @@ func (m Model) statusLine() string {
 	}
 	sep := styleDim.Render(" · ")
 	// With a pending selection the counts turn into fractions —
-	// 2/4 repos · 5/20 worktrees selected — numerators accented.
+	// 2/4 repos · 5/20 worktrees selected — numerators in the selection
+	// green, matching the selected rows' background.
 	counts := styleDim.Render(fmt.Sprintf("%d repos · %d %s", repos, total, unit))
 	if selItems > 0 {
-		counts = styleAccentBold.Render(fmt.Sprintf("%d", selRepos)) +
+		counts = styleGoodBold.Render(fmt.Sprintf("%d", selRepos)) +
 			styleDim.Render(fmt.Sprintf("/%d repos", repos)) + sep +
-			styleAccentBold.Render(fmt.Sprintf("%d", selItems)) +
+			styleGoodBold.Render(fmt.Sprintf("%d", selItems)) +
 			styleDim.Render(fmt.Sprintf("/%d %s ", total, unit)) +
-			styleAccentBold.Render("selected")
+			styleGoodBold.Render("selected")
 	}
 	parts := []string{counts}
 	if m.scanning {

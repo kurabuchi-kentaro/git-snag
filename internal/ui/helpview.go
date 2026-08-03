@@ -6,6 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+
+	"github.com/kurabuchi-kentaro/git-snag/internal/version"
 )
 
 // WithAnimation returns a copy of the model with the deletion animation
@@ -71,5 +73,5 @@ func (m Model) viewHelp() string {
 	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, kb.String(), "    ", tg.String())
-	return body + "\n" + styleDim.Render("press any key to close")
+	return body + "\n" + styleDim.Render("git-snag "+version.Version+" · press any key to close")
 }
