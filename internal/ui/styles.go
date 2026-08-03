@@ -7,8 +7,8 @@ import "charm.land/lipgloss/v2"
 
 // The palette follows ADR 0013: state colors come from the terminal's ANSI
 // palette so they track the user's theme; the one fixed color is the purple
-// accent, which marks operations (selection, visual range, filter, modal
-// frames) and degrades to ANSI magenta on non-truecolor terminals.
+// accent, which marks operations (selection, visual range, filter, branch
+// names) and degrades to ANSI magenta on non-truecolor terminals.
 var (
 	colorAccent = lipgloss.Color("#9d7cd8") // operations: selection, visual, modals
 	colorGood   = lipgloss.Color("2")       // merged, success
@@ -43,7 +43,7 @@ var (
 	styleBad       = lipgloss.NewStyle().Foreground(colorBad)
 	styleSync      = lipgloss.NewStyle().Foreground(colorSync)
 	styleDanger    = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
-	styleModal     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	styleModal     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("15")).Padding(0, 1)
 )
 
 // gutterBar marks rows inside the visual-mode range in the one-cell gutter
