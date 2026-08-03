@@ -41,3 +41,13 @@ brews:
       bin.install "git-snag"
     test: |
       system "#{bin}/git-snag", "--version"
+    caveats: |
+      git-snag's status tags use Nerd Font glyphs by default. If your
+      terminal font isn't patched, install one from https://www.nerdfonts.com
+      and set it in your terminal.
+
+      No Nerd Font? Fall back to plain Unicode glyphs, either per run:
+        git-snag --icons unicode
+      or permanently in ~/.config/git-snag/config.yaml:
+        ui:
+          icons: unicode
