@@ -8,8 +8,6 @@ experiments abandoned months ago, directories you `rm -rf`'d but git still
 remembers. git-snag finds them all and lets you clear them out — worktree
 and branch together, across every repository under your current directory.
 
-**Status: pre-release, under active development.**
-
 <!-- TODO: demo GIF (vhs/asciinema recording of browse → select → boom) -->
 
 ## What it does
@@ -52,8 +50,6 @@ and branch together, across every repository under your current directory.
   thanks! Skip it with any key, or disable it entirely.
 
 ## Install
-
-Not yet released. Once v0.1 is out:
 
 ```sh
 brew install kurabuchi-kentaro/tap/git-snag
