@@ -1,0 +1,6 @@
+# Used by tagpr (via gh2changelog) when it drafts the release PR body.
+# goreleaser generates the GitHub Release notes itself and ignores this file.
+changelog:
+  exclude:
+    labels:
+      - tagpr

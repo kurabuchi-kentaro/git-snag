@@ -68,6 +68,13 @@ convenience layer on top:
 See `docs/adr/0012-hooks-lefthook-gitleaks-and-jj-fix-workflow.md` for the
 full rationale.
 
+## Releases
+
+Releases are automated by tagpr: merging the release PR it keeps open against
+`main` tags the commit and runs goreleaser. Nothing in the tree records the
+version — no version file, no `CHANGELOG.md` — so never hand-edit one. See
+`docs/adr/0015-tagpr-release-prs-with-goreleaser-via-workflow-call.md`.
+
 ## Conventions
 
 - All project-facing text is English: README, CONTRIBUTING, ADRs, commit

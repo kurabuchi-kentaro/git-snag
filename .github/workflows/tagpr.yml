@@ -1,0 +1,42 @@
+name: tagpr
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tagpr:
+    runs-on: ubuntu-latest
+    # Serialize rapid pushes to main so two runs cannot race on the release PR.
+    concurrency: tagpr
+    permissions:
+      contents: write # push the release branch and the tag
+      pull-requests: write # open and update the release PR
+      issues: read # read labels of merged PRs to pick the next version
+    outputs:
+      tag: ${{ steps.tagpr.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # tagpr authenticates git itself from GITHUB_TOKEN; leaving the
+          # checkout credentials behind would shadow that.
+          persist-credentials: false
+      - id: tagpr
+        uses: Songmu/tagpr@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # A tag pushed with GITHUB_TOKEN never triggers another workflow, so the
+  # release is chained here off tagpr's `tag` output instead.
+  release:
+    needs: tagpr
+    if: needs.tagpr.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.tagpr.outputs.tag }}
+    secrets: inherit

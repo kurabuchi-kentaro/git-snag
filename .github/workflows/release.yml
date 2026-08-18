@@ -1,8 +1,17 @@
 name: Release
 
 on:
+  # Tags pushed by hand (from a maintainer's machine) trigger this directly.
+  # The tag tagpr pushes with GITHUB_TOKEN deliberately does not — tagpr.yml
+  # calls this workflow instead. See docs/adr/0015-*.md.
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag to build the release from. Defaults to the pushed ref.
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -13,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
