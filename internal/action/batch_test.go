@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,6 +267,52 @@ func TestExecute_worktreeGoneButBranchAlreadyDeleted(t *testing.T) {
 	}
 	if r.BranchErr == nil || !r.BranchAttempted {
 		t.Errorf("branch step should be recorded as failed separately: %+v", r)
+	}
+}
+
+func TestExecute_largeBatchAcrossReposDeletesEverythingInItemOrder(t *testing.T) {
+	t.Parallel()
+	const perRepo = 12
+	var items []PlanItem
+	var repos []*testutil.Repo
+	for range 2 {
+		repo := testutil.NewRepo(t)
+		repos = append(repos, repo)
+		for i := range perRepo {
+			repo.AddWorktree(fmt.Sprintf("feature/f%02d", i))
+		}
+		gone := repo.AddWorktree("feature/pruned")
+		if err := os.RemoveAll(gone); err != nil {
+			t.Fatal(err)
+		}
+		repo.Git("branch", "bare")
+		for _, w := range listWorktrees(t, repo.Dir) {
+			if !w.IsMain {
+				items = append(items, item(repo.Dir, w, true))
+			}
+		}
+		items = append(items, PlanItem{RepoPath: repo.Dir, Branch: "bare"})
+	}
+
+	results := Execute(t.Context(), items)
+	if len(results) != len(items) {
+		t.Fatalf("got %d results, want %d", len(results), len(items))
+	}
+	for i, r := range results {
+		if r.Item != items[i] {
+			t.Errorf("results[%d] belongs to %+v, want %+v", i, r.Item, items[i])
+		}
+		if r.Skipped || r.WorktreeErr != nil || !r.BranchAttempted || r.BranchErr != nil {
+			t.Errorf("results[%d] = %+v, want worktree and branch deleted", i, r)
+		}
+	}
+	for _, repo := range repos {
+		if remaining := listWorktrees(t, repo.Dir); len(remaining) != 1 {
+			t.Errorf("remaining worktrees = %+v, want only main", remaining)
+		}
+		if left := strings.TrimSpace(repo.Git("branch", "--list", "feature/*", "bare")); left != "" {
+			t.Errorf("branches left behind: %q", left)
+		}
 	}
 }
 

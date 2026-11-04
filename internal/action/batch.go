@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/kurabuchi-kentaro/git-snag/internal/domain"
 	"github.com/kurabuchi-kentaro/git-snag/internal/gitcli"
@@ -44,57 +45,130 @@ type Result struct {
 	BranchForced bool
 }
 
+// maxConcurrentGit caps the git processes a batch runs at once. Removal is
+// dominated by unlinking files, and beyond a few concurrent removals the
+// filesystem contention outweighs the overlap (measured on ext4 under WSL2:
+// 4 was fastest, 12 slower than 2).
+const maxConcurrentGit = 4
+
 // Execute runs the batch, never aborting on individual failures: every item
-// gets a Result. Prunable entries are pruned once per repository (git offers
-// no per-path prune), then verified against a fresh listing.
+// gets a Result, in item order. Repositories are processed concurrently, and
+// within a repository worktree removals run concurrently too; the steps that
+// rewrite repository-wide state run afterwards, one at a time per repository:
+// prune (which would race a removal in flight) and branch deletions (which
+// contend for the ref locks). Prunable entries are pruned once per repository
+// (git offers no per-path prune), then verified against a fresh listing.
 func Execute(ctx context.Context, items []PlanItem) []Result {
 	git := gitcli.New()
 	results := make([]Result, len(items))
-	prunedRepos := map[string]error{}
-
+	byRepo := map[string][]int{}
+	var repoOrder []string
 	for i, it := range items {
 		results[i] = Result{Item: it}
-		if ctx.Err() != nil {
-			results[i].Skipped = true
-			continue
+		if _, seen := byRepo[it.RepoPath]; !seen {
+			repoOrder = append(repoOrder, it.RepoPath)
 		}
-
-		if it.BranchOnly() {
-			results[i].BranchAttempted = true
-			results[i].BranchForced, results[i].BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Branch)
-			continue
-		}
-
-		if it.Worktree.Prunable {
-			results[i].WorktreeErr = pruneOnce(ctx, git, prunedRepos, it)
-		} else {
-			results[i].WorktreeErr = removeWorktree(ctx, git, it)
-		}
-		if results[i].WorktreeErr != nil {
-			continue
-		}
-		removeEmptyParents(it.Worktree.Path, it.RepoPath)
-
-		if it.DeleteBranch && !it.Worktree.Detached() {
-			results[i].BranchAttempted = true
-			results[i].BranchForced, results[i].BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Worktree.Branch)
-		}
+		byRepo[it.RepoPath] = append(byRepo[it.RepoPath], i)
 	}
+
+	slots := make(chan struct{}, maxConcurrentGit)
+	var wg sync.WaitGroup
+	for _, repo := range repoOrder {
+		wg.Go(func() { executeRepo(ctx, git, slots, byRepo[repo], results) })
+	}
+	wg.Wait()
 	return results
 }
 
-// removeWorktree unlocks when needed and removes, escalating to --force on
-// failure: the batch was explicitly confirmed past the dirty/locked warnings
-// (see ADR 0005), so a plain-removal refusal is not a stop condition.
+// executeRepo runs one repository's items, writing only results[idx] for
+// its own indices. slots bounds the git processes running across the batch.
+func executeRepo(ctx context.Context, git *gitcli.Client, slots chan struct{}, idx []int, results []Result) {
+	acquire := func() bool {
+		select {
+		case slots <- struct{}{}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	release := func() { <-slots }
+
+	var wg sync.WaitGroup
+	var prunable []int
+	for _, i := range idx {
+		r := &results[i]
+		switch {
+		case r.Item.BranchOnly():
+		case r.Item.Worktree.Prunable:
+			prunable = append(prunable, i)
+		default:
+			wg.Go(func() {
+				if ctx.Err() != nil || !acquire() {
+					r.Skipped = true
+					return
+				}
+				defer release()
+				r.WorktreeErr = removeWorktree(ctx, git, r.Item)
+				if r.WorktreeErr == nil {
+					removeEmptyParents(r.Item.Worktree.Path, r.Item.RepoPath)
+				}
+			})
+		}
+	}
+	wg.Wait()
+
+	if !acquire() {
+		for _, i := range idx {
+			if it := results[i].Item; it.BranchOnly() || it.Worktree.Prunable {
+				results[i].Skipped = true
+			}
+		}
+		return
+	}
+	defer release()
+
+	pruned := map[string]error{}
+	for _, i := range prunable {
+		r := &results[i]
+		if ctx.Err() != nil {
+			r.Skipped = true
+			continue
+		}
+		r.WorktreeErr = pruneOnce(ctx, git, pruned, r.Item)
+		if r.WorktreeErr == nil {
+			removeEmptyParents(r.Item.Worktree.Path, r.Item.RepoPath)
+		}
+	}
+
+	for _, i := range idx {
+		r := &results[i]
+		it := r.Item
+		if it.BranchOnly() {
+			if ctx.Err() != nil {
+				r.Skipped = true
+				continue
+			}
+			r.BranchAttempted = true
+			r.BranchForced, r.BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Branch)
+			continue
+		}
+		if r.Skipped || r.WorktreeErr != nil || !it.DeleteBranch || it.Worktree.Detached() {
+			continue
+		}
+		r.BranchAttempted = true
+		r.BranchForced, r.BranchErr = deleteBranch(ctx, git, it.RepoPath, it.Worktree.Branch)
+	}
+}
+
+// removeWorktree unlocks when needed and removes with --force: the batch was
+// explicitly confirmed past the dirty/locked warnings (see ADR 0005), so a
+// plain-removal refusal is not a stop condition. Going straight to --force
+// also skips the full status scan a plain removal runs first.
 func removeWorktree(ctx context.Context, git *gitcli.Client, it PlanItem) error {
 	if it.Worktree.Locked {
 		if err := git.UnlockWorktree(ctx, it.RepoPath, it.Worktree.Path); err != nil {
 			return err
 		}
-	}
-	err := git.RemoveWorktree(ctx, it.RepoPath, it.Worktree.Path, false)
-	if err == nil {
-		return nil
 	}
 	return git.RemoveWorktree(ctx, it.RepoPath, it.Worktree.Path, true)
 }
