@@ -83,3 +83,12 @@ level.
   checkout ref is `inputs.ref || github.ref` for exactly that reason.
 - If tagpr is ever given a PAT or GitHub App token, the chaining job can be
   dropped and the plain tag trigger takes over again.
+- The release PR's own CI is not a usable signal. It is opened with
+  `GITHUB_TOKEN`, so its `pull_request` run is attributed to
+  `github-actions[bot]`; for v0.1.3 that run ended in a startup failure
+  with no jobs executed, and `gh pr checks` reported no checks until it
+  registered. The release PR changes no files, so judge it by the CI run of
+  the `main` commit it was opened from.
+- A push to `main` whose `CI` and `tagpr` runs never start (seen when a
+  GitHub incident dropped the push event) is recovered by pushing an empty
+  commit to `main`, which fires both workflows again.

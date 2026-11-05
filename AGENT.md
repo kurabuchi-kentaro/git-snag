@@ -73,7 +73,8 @@ full rationale.
 Releases are automated by tagpr: merging the release PR it keeps open against
 `main` tags the commit and runs goreleaser. Nothing in the tree records the
 version — no version file, no `CHANGELOG.md` — so never hand-edit one. See
-`docs/adr/0015-tagpr-release-prs-with-goreleaser-via-workflow-call.md`.
+`docs/adr/0015-tagpr-release-prs-with-goreleaser-via-workflow-call.md`, also
+before merging a release PR and when a push to `main` starts no workflow runs.
 
 ## Conventions
 
